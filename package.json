@@ -1,6 +1,6 @@
 {
   "name": "quan-ly-kho",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Ứng dụng quản lý kho - nhập xuất tồn, giá vốn bình quân gia quyền cuối kỳ",
   "main": "server.js",
   "scripts": {

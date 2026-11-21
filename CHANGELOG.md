@@ -1,5 +1,8 @@
 # Lịch sử phiên bản
 
+## 1.4.1
+- Sửa lỗi giao diện hiển thị sai (biểu tượng to, bố cục vỡ) sau khi cập nhật do trình duyệt / Cloudflare dùng lại file cũ: đường dẫn css/js nay gắn số phiên bản, trang chính không lưu tạm.
+
 ## 1.4.0
 - Giao diện mới theo phong cách phần mềm kế toán doanh nghiệp: thanh trên màu trắng, menu trái có biểu tượng (thu gọn được), bảng kẻ ô gọn gàng, tự chuyển nền tối theo máy.
 - Báo cáo nhập – xuất – tồn: cố định dòng tiêu đề, thêm dòng lọc theo từng cột (gõ không dấu; cột số gõ >0, <100, =5…), dòng tổng tự tính theo dòng đang hiện.

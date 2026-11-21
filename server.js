@@ -82,6 +82,16 @@ app.use((req, res, next) => {
   if (process.env.COOKIE_SECURE === '1' || auth.isHttps(req)) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
   next();
 });
+// Trang chính: gắn số phiên bản vào đường dẫn css/js để trình duyệt và Cloudflare không dùng lại file cũ sau khi cập nhật
+const readAsset = (name) => (EMBEDDED ? (Object.prototype.hasOwnProperty.call(EMBEDDED, name) ? Buffer.from(EMBEDDED[name], 'base64').toString('utf8') : null) : (() => { try { return fs.readFileSync(path.join(__dirname, 'public', name), 'utf8'); } catch { return null; } })());
+app.get(['/', '/index.html'], (req, res, next) => {
+  const html = readAsset('/index.html');
+  if (html === null) return next();
+  const v = encodeURIComponent(APP_VERSION);
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
+  res.end(html.replace(/(href|src)="\/(style\.css|app\.js|partners\.js)"/g, `$1="/$2?v=${v}"`));
+});
 if (EMBEDDED) {
   // Giao diện được nhúng bên trong bản đóng gói / gói cập nhật
   const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
@@ -95,7 +105,7 @@ if (EMBEDDED) {
     res.end(Buffer.from(buf));
   });
 } else {
-  app.use(express.static(path.join(__dirname, 'public')));
+  app.use(express.static(path.join(__dirname, 'public'), { setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache') }));
 }
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
