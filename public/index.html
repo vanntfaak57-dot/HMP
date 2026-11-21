@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quản lý kho</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="login-view" class="login hidden">
+    <form id="login-form" class="login-box">
+      <h1>Quản lý kho</h1>
+      <p class="muted">Đăng nhập để tiếp tục</p>
+      <label>Tên đăng nhập<input name="username" autocomplete="username" required autofocus></label>
+      <label>Mật khẩu<input name="password" type="password" autocomplete="current-password" required></label>
+      <div id="login-error" class="error"></div>
+      <button class="btn primary" type="submit">Đăng nhập</button>
+    </form>
+  </div>
+
+  <div id="app-view" class="layout hidden">
+    <aside class="sidebar">
+      <div class="brand" id="brand">Quản lý kho</div>
+      <nav id="nav">
+        <a href="#/dashboard">Tổng quan</a>
+        <div class="nav-group">Danh mục</div>
+        <a href="#/items">Vật tư hàng hóa &amp; tồn đầu</a>
+        <div class="nav-group">Nghiệp vụ</div>
+        <a href="#/vouchers/N">Phiếu nhập kho</a>
+        <a href="#/vouchers/X">Phiếu xuất kho bán hàng</a>
+        <a href="#/costing">Tính giá xuất kho</a>
+        <div class="nav-group">Báo cáo</div>
+        <a href="#/report-nxt">Tổng hợp nhập-xuất-tồn</a>
+        <a href="#/ledger">Sổ chi tiết vật tư</a>
+        <div class="nav-group admin-only">Hệ thống</div>
+        <a href="#/users" class="admin-only">Người dùng</a>
+        <a href="#/audit" class="admin-only">Nhật ký truy cập</a>
+        <a href="#/settings" class="admin-only">Cài đặt</a>
+      </nav>
+      <div class="userbox">
+        <div id="user-name"></div>
+        <a href="#/account">Đổi mật khẩu</a> · <a href="#" id="logout">Đăng xuất</a>
+      </div>
+    </aside>
+    <main id="main"></main>
+  </div>
+  <div id="toast"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
