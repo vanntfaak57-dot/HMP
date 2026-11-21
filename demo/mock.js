@@ -39,7 +39,7 @@
   // ---------------- Dữ liệu mẫu ----------------
   function seed() {
     D = { seq: {}, users: [], sessions: [], audit: [], settings: {}, items: [], vouchers: [], lines: [], periods: {}, partners: [] };
-    D.settings = { company_name: 'Công ty TNHH Vật liệu Xây dựng An Phát (DEMO)', company_address: '25 Nguyễn Trãi, Thanh Xuân, Hà Nội', company_tax: '0109xxxxxx', opening_date: '2026-09-30' };
+    D.settings = { company_name: 'Kho hàng ETC MDA', company_address: '', company_tax: '', opening_date: '2026-09-30' };
     const mkUser = (username, full_name, role, pw) => D.users.push({ id: nextId('users'), username, full_name, role, password_hash: hash(pw), active: 1, must_change: 0, failed_count: 0, locked_until: null, created_at: '2026-09-30 08:00:00' });
     mkUser('admin', 'Quản trị hệ thống', 'admin', 'admin123');
     mkUser('ketoan', 'Nguyễn Thu Hà', 'user', 'ketoan123');
@@ -84,6 +84,7 @@
   function load() {
     try { const s = localStorage.getItem(DB_KEY); if (s) D = JSON.parse(s); } catch { D = null; }
     if (!D || !D.users) seed();
+    if (/An Phát \(DEMO\)/.test(D.settings.company_name || '')) Object.assign(D.settings, { company_name: 'Kho hàng ETC MDA', company_address: '', company_tax: '' });
     D.partners = D.partners || [];
     D.items.forEach((i) => { if (i.vat_rate === undefined) i.vat_rate = null; });
   }

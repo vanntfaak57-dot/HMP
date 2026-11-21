@@ -191,4 +191,7 @@ function setSetting(key, value) {
   db.prepare('INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
 }
 
+// Tên đơn vị mặc định (đổi được trong Cài đặt)
+if (!getSetting('company_name')) setSetting('company_name', 'Kho hàng ETC MDA');
+
 module.exports = { db, tx, now, getSetting, setSetting, DATA_DIR, UPLOAD_DIR };

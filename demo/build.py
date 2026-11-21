@@ -39,8 +39,8 @@ body = rep(body, '<button class="btn primary" type="submit">Đăng nhập</butto
   '<span class="muted">Dữ liệu mẫu, lưu trong trình duyệt của bạn.</span> <a href="#" id="demo-reset-login">Nạp lại dữ liệu mẫu</a></div>')
 body = rep(body, '<input name="username" autocomplete="username" required autofocus>', '<input name="username" id="login-user" autocomplete="username" required autofocus value="admin">')
 body = rep(body, '<input name="password" type="password" autocomplete="current-password" required>', '<input name="password" id="login-pass" type="password" autocomplete="current-password" required value="admin123">')
-body = rep(body, '<div class="brand" id="brand">Quản lý kho</div>',
-  '<div class="brand" id="brand">Quản lý kho</div>\n      <div class="demo-tag">Bản demo · dữ liệu lưu trong trình duyệt · <button id="demo-reset" type="button">Nạp lại dữ liệu mẫu</button></div>')
+body = rep(body, '<div class="brand" id="brand">Kho hàng ETC MDA</div>',
+  '<div class="brand" id="brand">Kho hàng ETC MDA</div>\n      <div class="demo-tag">Bản demo · dữ liệu lưu trong trình duyệt · <button id="demo-reset" type="button">Nạp lại dữ liệu mẫu</button></div>')
 
 pdf_b64 = base64.b64encode((d / 'sample.pdf').read_bytes()).decode()
 out = f'''<title>Quản lý kho</title>

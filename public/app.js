@@ -84,7 +84,7 @@ async function boot() {
   $('#login-view').classList.add('hidden');
   $('#app-view').classList.remove('hidden');
   $('#user-name').textContent = `${ME.full_name || ME.username} (${ME.role})`;
-  $('#brand').textContent = SETTINGS.company_name || 'Quản lý kho';
+  $('#brand').textContent = SETTINGS.company_name || 'Kho hàng ETC MDA';
   $$('.admin-only').forEach((el) => el.classList.toggle('hidden', ME.role !== 'admin'));
   if (ME.must_change) location.hash = '#/account';
   route();
