@@ -18,12 +18,14 @@ Biến môi trường tùy chọn: `PORT` (mặc định 3000), `HOST` (mặc đ
 ## Quy trình sử dụng
 
 1. **Cài đặt** → nhập tên đơn vị và **ngày chốt số dư đầu kỳ (ngày A)**.
-2. **Vật tư hàng hóa & tồn đầu** → tải *file Excel mẫu*, điền Mã / Tên / ĐVT / SL tồn / Giá trị tồn tại ngày A, rồi *Nhập từ Excel* (hoặc thêm từng mã).
+2. **Vật tư hàng hóa & tồn đầu** → tải *file Excel mẫu*, điền Mã / Tên / ĐVT / SL tồn / Giá trị tồn tại ngày A / Ghi chú / Thuế suất GTGT / Giá bán (+VAT), rồi *Nhập từ Excel* (hoặc thêm từng mã).
 3. **Danh mục khách hàng** và **Danh mục nhà cung cấp** (hai danh mục riêng, mỗi dòng gồm Mã / Tên / Mã số thuế) → thêm từng dòng hoặc nhập từ Excel 3 cột: Mã, Tên, MST. Mã chỉ cần không trùng trong cùng danh mục.
 4. **Phiếu nhập kho / Phiếu xuất kho bán hàng** → *Thêm phiếu*:
    - kéo thả file **PDF** phiếu xuất kho / hóa đơn → hệ thống tự đọc số phiếu, ngày, khách hàng, lý do, các dòng hàng (mã, số lượng, đơn giá, thành tiền). Dòng có mã chưa có trong danh mục sẽ được liệt kê để chọn mã hoặc tạo mã mới. Kiểm tra lại rồi bấm *Lưu*. File PDF gốc được lưu kèm chứng từ.
    - hoặc nhập tay.
    - Chọn khách hàng (phiếu xuất) hoặc nhà cung cấp (phiếu nhập) trong danh mục tương ứng; tên tự điền. Khi đọc PDF, hệ thống tự nhận đối tượng theo mã số thuế hoặc tên; nếu chưa có thì gợi ý thêm vào danh mục.
+   - Đơn giá: nhập vào cột **Đơn giá (+VAT)** thì phần mềm tự chia ra đơn giá chưa thuế theo % thuế GTGT của dòng; nhập vào cột **Đơn giá (-VAT)** thì giữ nguyên giá đó. Có cột CK (%), tiền thuế GTGT, tổng tiền thanh toán và số tiền bằng chữ.
+   - Gợi ý giá: khi chọn khách hàng và mã hàng, phần mềm tự điền **đơn giá lần gần nhất bán mặt hàng đó cho khách đó**; khách chưa từng mua thì điền **giá bán khai báo trong danh mục vật tư**. Phiếu nhập gợi ý giá mua lần trước của nhà cung cấp.
    - Hệ thống chặn chứng từ trước ngày A, chặn xuất âm kho, chặn trùng số phiếu.
 5. **Tính giá xuất kho** → chọn tháng, bấm *Tính giá đến kỳ này*. Giá vốn được ghi vào từng dòng phiếu xuất.
 6. **Báo cáo**: Dashboard phân tích (doanh thu, giá vốn, lãi gộp, nhập kho, tồn kho theo tháng; top khách hàng, mặt hàng, nhà cung cấp), Tổng hợp nhập-xuất-tồn (xuất Excel, in), Sổ chi tiết vật tư, Tổng hợp theo đối tượng (bán hàng theo khách hàng có lãi gộp, mua hàng theo nhà cung cấp; bấm vào tên để xem chi tiết theo mặt hàng và chứng từ).

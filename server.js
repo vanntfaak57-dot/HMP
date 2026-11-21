@@ -95,6 +95,16 @@ app.put('/api/settings', adminOnly, h((req, res) => {
 }));
 
 // ---------------- Danh mục vật tư hàng hóa ----------------
+
+// Giá bán trong danh mục: nhập giá +VAT thì tự tính giá -VAT theo thuế suất; chỉ nhập giá -VAT thì giữ nguyên
+function salePrices(b, vat) {
+  const has = (v) => v !== undefined && v !== null && String(v).trim() !== '';
+  const k = 1 + (/^\d+$/.test(vat || '') ? Number(vat) : 0) / 100;
+  if (has(b.sale_price_vat)) { const g = num(b.sale_price_vat); if (g < 0) throw fail('Giá bán không hợp lệ'); return { sale_price: Math.round(g / k * 100) / 100, sale_price_vat: g }; }
+  if (has(b.sale_price)) { const n = num(b.sale_price); if (n < 0) throw fail('Giá bán không hợp lệ'); return { sale_price: n, sale_price_vat: null }; }
+  return { sale_price: null, sale_price_vat: null };
+}
+const setSale = (id, sp) => db.prepare('UPDATE items SET sale_price = ?, sale_price_vat = ? WHERE id = ?').run(sp.sale_price, sp.sale_price_vat, id);
 function assertOpeningEditable() {
   if (db.prepare('SELECT COUNT(*) c FROM periods WHERE locked = 1').get().c) throw fail('Đã có kỳ khóa sổ, không thể sửa số dư đầu kỳ');
 }
@@ -108,10 +118,12 @@ app.post('/api/items', canWrite, h((req, res) => {
   const b = req.body || {};
   if (!b.code || !b.name) throw fail('Mã và tên hàng là bắt buộc');
   if (num(b.opening_qty) || num(b.opening_value)) assertOpeningEditable();
+  const sp = salePrices(b, normVat(b.vat_rate));
   const r = db.prepare('INSERT INTO items(code, name, unit, vat_rate, opening_qty, opening_value, note, created_at) VALUES (?,?,?,?,?,?,?,?)')
     .run(String(b.code).trim(), String(b.name).trim(), b.unit || '', normVat(b.vat_rate), num(b.opening_qty), Math.round(num(b.opening_value)), b.note || '', now());
+  setSale(Number(r.lastInsertRowid), sp);
   if (num(b.opening_qty) || num(b.opening_value)) costing.markDirty(costing.firstMonth() || '0000-00');
-  audit(req, 'ITEM_CREATE', `${b.code} - ${b.name}${b.vat_rate ? `, thuế GTGT ${b.vat_rate}` : ''}`);
+  audit(req, 'ITEM_CREATE', `${b.code} - ${b.name}${b.vat_rate ? `, thuế GTGT ${b.vat_rate}` : ''}${sp.sale_price != null ? `, giá bán ${sp.sale_price_vat ?? sp.sale_price}${sp.sale_price_vat != null ? ' (+VAT)' : ' (-VAT)'}` : ''}`);
   res.json({ id: Number(r.lastInsertRowid) });
 }));
 app.put('/api/items/:id', canWrite, h((req, res) => {
@@ -120,14 +132,16 @@ app.put('/api/items/:id', canWrite, h((req, res) => {
   if (!it) throw fail('Không tìm thấy mã hàng', 404);
   const oq = num(b.opening_qty), ov = Math.round(num(b.opening_value));
   const vat = normVat(b.vat_rate);
+  const sp = salePrices(b, vat);
   const openingChanged = oq !== it.opening_qty || ov !== it.opening_value;
   if (openingChanged) assertOpeningEditable();
   tx(() => {
     db.prepare('UPDATE items SET code=?, name=?, unit=?, vat_rate=?, opening_qty=?, opening_value=?, note=?, updated_at=? WHERE id=?')
       .run(String(b.code).trim(), String(b.name).trim(), b.unit || '', vat, oq, ov, b.note || '', now(), it.id);
+    setSale(it.id, sp);
     if (openingChanged) { costing.checkNoNegative([it.id]); costing.markDirty(costing.firstMonth() || '0000-00'); }
   });
-  audit(req, 'ITEM_UPDATE', `${it.code}: ${JSON.stringify({ code: b.code, name: b.name, vat_rate: vat, opening_qty: oq, opening_value: ov })} (cũ: thuế ${it.vat_rate ?? '-'}, SL ${it.opening_qty}, GT ${it.opening_value})`);
+  audit(req, 'ITEM_UPDATE', `${it.code}: ${JSON.stringify({ code: b.code, name: b.name, vat_rate: vat, opening_qty: oq, opening_value: ov, ...sp })} (cũ: thuế ${it.vat_rate ?? '-'}, giá bán ${it.sale_price_vat ?? it.sale_price ?? '-'}, SL ${it.opening_qty}, GT ${it.opening_value})`);
   res.json({ ok: true });
 }));
 app.delete('/api/items/:id', canWrite, h((req, res) => {
@@ -173,8 +187,9 @@ app.get('/api/items/template.xlsx', h(async (req, res) => {
     { header: 'ĐVT', key: 'unit', width: 10 }, { header: 'SL tồn đầu kỳ', key: 'qty', width: 15 },
     { header: 'Giá trị tồn đầu kỳ', key: 'val', width: 20 }, { header: 'Ghi chú', key: 'note', width: 25 },
     { header: 'Thuế suất GTGT (0%, 5%, 8%, 10%, KCT, KKKNT)', key: 'vat', width: 22 },
+    { header: 'Giá bán (+VAT)', key: 'sale', width: 16 },
   ];
-  ws.addRow({ code: 'VT001', name: 'Xi măng PCB40', unit: 'Bao', qty: 100, val: 8500000, vat: '10%' });
+  ws.addRow({ code: 'VT001', name: 'Xi măng PCB40', unit: 'Bao', qty: 100, val: 8500000, vat: '10%', sale: 99000 });
   ws.getRow(1).font = { bold: true };
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', 'attachment; filename="mau_danh_muc_ton_dau.xlsx"');
@@ -194,10 +209,10 @@ app.post('/api/items/import', canWrite, upload.single('file'), h(async (req, res
     const code = String(val(row.getCell(1)) ?? '').trim();
     if (!code) return;
     rows.push({ code, name: String(val(row.getCell(2)) ?? '').trim(), unit: String(val(row.getCell(3)) ?? '').trim(),
-      qty: num(val(row.getCell(4))), value: Math.round(num(val(row.getCell(5)))), note: String(val(row.getCell(6)) ?? '').trim(), vat: val(row.getCell(7)), line: i });
+      qty: num(val(row.getCell(4))), value: Math.round(num(val(row.getCell(5)))), note: String(val(row.getCell(6)) ?? '').trim(), vat: val(row.getCell(7)), sale_vat: val(row.getCell(8)), line: i });
   });
   if (!rows.length) throw fail('File không có dữ liệu (dòng 1 là tiêu đề, từ dòng 2: Mã, Tên, ĐVT, SL tồn, Giá trị tồn, Ghi chú, Thuế suất GTGT)');
-  for (const r of rows) { try { r.vat = normVat(r.vat); } catch (e) { throw fail(`Dòng ${r.line} (mã ${r.code}): ${e.message}`); } }
+  for (const r of rows) { try { r.vat = normVat(r.vat); r.sp = salePrices({ sale_price_vat: r.sale_vat }, r.vat); } catch (e) { throw fail(`Dòng ${r.line} (mã ${r.code}): ${e.message}`); } }
   assertOpeningEditable();
   let created = 0, updated = 0;
   tx(() => {
@@ -206,9 +221,11 @@ app.post('/api/items/import', canWrite, upload.single('file'), h(async (req, res
       const ex = db.prepare('SELECT id FROM items WHERE code = ?').get(r.code);
       if (ex) {
         db.prepare('UPDATE items SET name=?, unit=?, vat_rate=?, opening_qty=?, opening_value=?, note=?, updated_at=? WHERE id=?').run(r.name, r.unit, r.vat, r.qty, r.value, r.note, now(), ex.id);
+        if (r.sp.sale_price != null) setSale(ex.id, r.sp);
         updated++;
       } else {
-        db.prepare('INSERT INTO items(code, name, unit, vat_rate, opening_qty, opening_value, note, created_at) VALUES (?,?,?,?,?,?,?,?)').run(r.code, r.name, r.unit, r.vat, r.qty, r.value, r.note, now());
+        const ins = db.prepare('INSERT INTO items(code, name, unit, vat_rate, opening_qty, opening_value, note, created_at) VALUES (?,?,?,?,?,?,?,?)').run(r.code, r.name, r.unit, r.vat, r.qty, r.value, r.note, now());
+        setSale(Number(ins.lastInsertRowid), r.sp);
         created++;
       }
     }
@@ -398,7 +415,8 @@ function validateVoucher(b) {
     let vat_rate;
     try { vat_rate = l.vat_rate === undefined ? item.vat_rate : normVat(l.vat_rate); } catch (e) { throw fail(`Dòng ${i + 1} (${item.code}): ${e.message}`); }
     const vat_amount = /^\d+$/.test(vat_rate || '') ? Math.round(amount * Number(vat_rate) / 100) : 0;
-    return { item_id: item.id, qty, unit_price: price, amount, discount_rate, vat_rate, vat_amount, sort: i };
+    const price_vat = l.price_vat === undefined || l.price_vat === null || l.price_vat === '' ? null : num(l.price_vat);
+    return { item_id: item.id, qty, unit_price: price, price_vat, amount, discount_rate, vat_rate, vat_amount, sort: i };
   });
   return { type, number, date: b.date, partner_id, partner: partnerName, address: b.address || '', description: b.description || '', ref_no: b.ref_no || '', ...extraFields(b), source: b.source === 'pdf' ? 'pdf' : 'manual', attachment: safeAttachment(b.attachment), lines: clean };
 }
@@ -412,8 +430,8 @@ function safeAttachment(a) {
   return /^[a-f0-9]{32}\.pdf$/.test(s) && fs.existsSync(path.join(UPLOAD_DIR, s)) ? s : null;
 }
 function insertLines(vid, lines) {
-  const st = db.prepare('INSERT INTO voucher_lines(voucher_id, item_id, qty, unit_price, amount, discount_rate, vat_rate, vat_amount, sort) VALUES (?,?,?,?,?,?,?,?,?)');
-  for (const l of lines) st.run(vid, l.item_id, l.qty, l.unit_price, l.amount, l.discount_rate, l.vat_rate, l.vat_amount, l.sort);
+  const st = db.prepare('INSERT INTO voucher_lines(voucher_id, item_id, qty, unit_price, price_vat, amount, discount_rate, vat_rate, vat_amount, sort) VALUES (?,?,?,?,?,?,?,?,?,?)');
+  for (const l of lines) st.run(vid, l.item_id, l.qty, l.unit_price, l.price_vat, l.amount, l.discount_rate, l.vat_rate, l.vat_amount, l.sort);
 }
 const summary = (v) => `${TYPE_NAME[v.type]} ${v.number} ngày ${v.date}, ${v.lines.length} dòng, tổng ${v.lines.reduce((s, l) => s + l.amount, 0).toLocaleString('vi-VN')}`;
 
@@ -492,6 +510,18 @@ app.post('/api/vouchers/bulk-delete', canWrite, h((req, res) => {
     }
   }
   res.json({ deleted, skipped });
+}));
+
+// Đơn giá gần nhất của từng mặt hàng đã bán cho một khách hàng (phiếu xuất) / mua của một nhà cung cấp (phiếu nhập)
+app.get('/api/last-prices', h((req, res) => {
+  const pid = Number(req.query.partner_id), type = req.query.type === 'N' ? 'N' : 'X';
+  if (!pid) return res.json({});
+  const rows = db.prepare(`SELECT l.item_id, l.unit_price, l.price_vat, l.discount_rate, l.vat_rate, v.date, v.number
+    FROM voucher_lines l JOIN vouchers v ON v.id = l.voucher_id
+    WHERE v.partner_id = ? AND v.type = ? AND v.id <> ? ORDER BY v.date DESC, v.id DESC, l.sort DESC`).all(pid, type, Number(req.query.exclude) || 0);
+  const out = {};
+  for (const r of rows) if (!out[r.item_id]) out[r.item_id] = r;
+  res.json(out);
 }));
 
 // ---------------- Đọc PDF ----------------

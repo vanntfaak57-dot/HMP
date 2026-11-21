@@ -195,7 +195,8 @@ function setSetting(key, value) {
 for (const [table, col, def] of [
   ['vouchers', 'tax_code', 'TEXT'], ['vouchers', 'contact', 'TEXT'], ['vouchers', 'phone', 'TEXT'],
   ['vouchers', 'delivery_place', 'TEXT'], ['vouchers', 'salesperson', 'TEXT'], ['vouchers', 'warehouse', 'TEXT'],
-  ['voucher_lines', 'discount_rate', 'REAL NOT NULL DEFAULT 0'], ['voucher_lines', 'vat_rate', 'TEXT'], ['voucher_lines', 'vat_amount', 'REAL NOT NULL DEFAULT 0'],
+  ['voucher_lines', 'discount_rate', 'REAL NOT NULL DEFAULT 0'], ['voucher_lines', 'vat_rate', 'TEXT'], ['voucher_lines', 'vat_amount', 'REAL NOT NULL DEFAULT 0'], ['voucher_lines', 'price_vat', 'REAL'],
+  ['items', 'sale_price', 'REAL'], ['items', 'sale_price_vat', 'REAL'],
 ]) {
   if (!db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
 }

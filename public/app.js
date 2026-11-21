@@ -186,12 +186,13 @@ async function pageItems() {
       ${W ? `<td class="chk-col"><label class="chk"><input type="checkbox" data-sel="${i.id}" aria-label="Chọn ${esc(i.code)}"></label></td>` : ''}
       <td>${esc(i.code)}</td><td>${esc(i.name)}</td><td>${esc(i.unit)}</td>
       <td class="num">${i.vat_rate ? esc(vatLabel(i.vat_rate)) : '<span class="muted">—</span>'}</td>
+      <td class="num">${i.sale_price != null ? fmtN(i.sale_price_vat ?? round2(i.sale_price * (1 + vatPct(i) / 100))) : '<span class="muted">—</span>'}</td>
       <td class="num">${fmtN(i.opening_qty, 3)}</td><td class="num">${fmtM(i.opening_value)}</td>
       <td class="num">${i.opening_qty ? fmtN(i.opening_value / i.opening_qty) : ''}</td>
       <td class="num">${fmtN(i.stock_qty, 3)}</td>
       <td>${canWrite() ? `<button class="btn small" data-edit="${i.id}">Sửa</button> <button class="btn small danger" data-del="${i.id}">Xóa</button>` : ''}</td></tr>`).join('')
-      || `<tr><td colspan="${W ? 10 : 9}" class="muted">Chưa có mã hàng</td></tr>`;
-    $('#items-foot').innerHTML = `<tr><td colspan="${W ? 6 : 5}">Tổng cộng (${list.length} mã)</td><td class="num">${fmtM(tq)}</td><td colspan="3"></td></tr>`;
+      || `<tr><td colspan="${W ? 11 : 10}" class="muted">Chưa có mã hàng</td></tr>`;
+    $('#items-foot').innerHTML = `<tr><td colspan="${W ? 7 : 6}">Tổng cộng (${list.length} mã)</td><td class="num">${fmtM(tq)}</td><td colspan="3"></td></tr>`;
     updateSelection();
   };
   $('#main').innerHTML = `
@@ -208,7 +209,7 @@ async function pageItems() {
       <a class="btn" href="/api/items/template.xlsx">Tải file Excel mẫu</a>
       <label class="btn">Nhập từ Excel<input type="file" id="item-import" accept=".xlsx" hidden></label>` : ''}
     </div>
-    <div class="table-wrap sticky-head"><table><thead><tr>${W ? '<th class="chk-col"><label class="chk"><input type="checkbox" id="items-all" aria-label="Chọn tất cả" title="Chọn tất cả"></label></th>' : ''}<th>Mã hàng</th><th>Tên hàng</th><th>ĐVT</th><th class="num">Thuế suất GTGT</th><th class="num">SL tồn đầu</th><th class="num">Giá trị tồn đầu</th><th class="num">Đơn giá đầu kỳ</th><th class="num">SL tồn hiện tại</th><th></th></tr></thead>
+    <div class="table-wrap sticky-head"><table><thead><tr>${W ? '<th class="chk-col"><label class="chk"><input type="checkbox" id="items-all" aria-label="Chọn tất cả" title="Chọn tất cả"></label></th>' : ''}<th>Mã hàng</th><th>Tên hàng</th><th>ĐVT</th><th class="num">Thuế suất GTGT</th><th class="num">Giá bán (+VAT)</th><th class="num">SL tồn đầu</th><th class="num">Giá trị tồn đầu</th><th class="num">Đơn giá đầu kỳ</th><th class="num">SL tồn hiện tại</th><th></th></tr></thead>
     <tbody id="items-body"></tbody><tfoot id="items-foot"></tfoot></table></div>`;
   render();
   $('#items-filter').addEventListener('input', (e) => { filter = e.target.value; render(); });
@@ -268,10 +269,25 @@ function itemDialog(it, onSaved) {
       <label>Giá trị tồn đầu kỳ<input name="opening_value" type="number" step="any" value="${it?.opening_value ?? 0}"></label>
       <label>Thuế suất thuế GTGT<select name="vat_rate">${VAT_OPTIONS.map(([v, t]) => `<option value="${v}" ${(it?.vat_rate ?? '') === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
       <label>Ghi chú<input name="note" value="${esc(it?.note)}"></label>
+      <label>Giá bán (+VAT)<input name="sale_price_vat" id="it-gross" type="number" step="any" min="0" value="${it?.sale_price != null ? (it.sale_price_vat ?? round2(it.sale_price * (1 + vatPct(it) / 100))) : ''}"></label>
+      <label>Giá bán (-VAT)<input name="sale_price" id="it-net" type="number" step="any" min="0" value="${it?.sale_price ?? ''}"></label>
+      <p class="muted wide" style="margin:0;font-size:12px">Nhập giá có thuế thì phần mềm tự tính giá chưa thuế theo thuế suất (và ngược lại). Giá này được gợi ý khi lập phiếu xuất cho khách chưa từng mua mặt hàng.</p>
     </form>
     <div class="actions"><button class="btn" data-close>Hủy</button><button class="btn primary" id="item-save">Lưu</button></div>`, (bg, close) => {
+    // Giá +VAT và -VAT tính qua lại theo thuế suất; ô nhập sau cùng là ô gốc
+    let mode = it?.sale_price_vat != null || it?.sale_price == null ? 'gross' : 'net';
+    const sync = () => {
+      const k = 1 + vatPct({ vat_rate: $('[name=vat_rate]', bg).value }) / 100;
+      const g = $('#it-gross', bg), n = $('#it-net', bg);
+      if (mode === 'gross') n.value = g.value === '' ? '' : round2(Number(g.value) / k);
+      else g.value = n.value === '' ? '' : round2(Number(n.value) * k);
+    };
+    $('#it-gross', bg).addEventListener('input', () => { mode = 'gross'; sync(); });
+    $('#it-net', bg).addEventListener('input', () => { mode = 'net'; sync(); });
+    $('[name=vat_rate]', bg).addEventListener('change', sync);
     $('#item-save', bg).addEventListener('click', async () => {
       const body = Object.fromEntries(new FormData($('#item-form', bg)));
+      if (mode === 'net') body.sale_price_vat = '';
       try {
         const r = await api(it ? `/api/items/${it.id}` : '/api/items', { method: it ? 'PUT' : 'POST', body });
         close(); toast('Đã lưu');
@@ -391,7 +407,7 @@ async function pageVoucherForm(type, id) {
   $('#main').dataset.vtype = type;
   let items = await api(`/api/items?date=${v.date}&exclude=${id || 0}`);
   const editable = canWrite() && !v.locked;
-  let lines = v.lines.map((l) => ({ item_id: l.item_id, qty: l.qty, unit_price: l.unit_price, discount_rate: l.discount_rate || 0, amount: l.amount, vat_rate: l.vat_rate ?? '', cost_price: l.cost_price, cost_amount: l.cost_amount }));
+  let lines = v.lines.map((l) => ({ item_id: l.item_id, qty: l.qty, unit_price: l.unit_price, price_vat: l.price_vat, mode: l.price_vat != null ? 'gross' : 'net', discount_rate: l.discount_rate || 0, amount: l.amount, vat_rate: l.vat_rate ?? '', cost_price: l.cost_price, cost_amount: l.cost_amount }));
   if (!lines.length) lines.push({});
   let unmatched = [];
   let state = { attachment: v.attachment || null, source: v.source };
@@ -403,6 +419,32 @@ async function pageVoucherForm(type, id) {
   const kindPartners = () => allPartners;
   const pickLabel = (p) => `${p.code} - ${p.name}`;
   const curPartner = allPartners.find((p) => p.id === partnerId);
+  let lastPrices = {};
+  // Nạp đơn giá gần nhất theo khách hàng / nhà cung cấp đang chọn
+  async function loadLastPrices() {
+    lastPrices = partnerId ? await api(`/api/last-prices?type=${type}&partner_id=${partnerId}&exclude=${id || 0}`) : {};
+    let filled = 0;
+    for (const l of lines) if (lastPrices[l.item_id] && applyLastPrice(l)) filled++;
+    renderLines();
+    if (filled) toast(`Đã điền đơn giá lần trước cho ${filled} dòng`);
+  }
+  // Điền giá lần trước vào dòng chưa có giá; trả về true nếu đã điền
+  function suggestOf(l) {
+    if (!l.item_id) return null;
+    if (lastPrices[l.item_id]) return { ...lastPrices[l.item_id], source: 'last' };
+    const it = items.find((i) => i.id === l.item_id);
+    if (X && it && it.sale_price != null) return { unit_price: it.sale_price, price_vat: it.sale_price_vat, discount_rate: 0, vat_rate: it.vat_rate, source: 'catalog' };
+    return null;
+  }
+  function applyLastPrice(l) {
+    const lp = suggestOf(l);
+    if (!lp || Number(l.unit_price) || Number(l.price_vat) || !editable) return false;
+    if (lp.price_vat != null) { l.price_vat = lp.price_vat; l.mode = 'gross'; } else { l.unit_price = lp.unit_price; l.mode = 'net'; }
+    l.discount_rate = lp.discount_rate || 0;
+    if (lp.vat_rate != null && lp.vat_rate !== '') l.vat_rate = lp.vat_rate;
+    recalcLine(l);
+    return true;
+  }
 
   $('#main').innerHTML = `
     <div class="toolbar"><a class="btn" href="#/vouchers/${type}">← Danh sách</a><h1 style="margin:0">${TYPE[type]} ${id ? esc(v.number) : '(mới)'}</h1>
@@ -434,7 +476,7 @@ async function pageVoucherForm(type, id) {
     </div>
     <div id="unmatched"></div>
     <div class="table-wrap"><table class="lines"><thead><tr><th>#</th><th style="min-width:150px">Mã hàng</th><th>Tên hàng</th><th>ĐVT</th>
-      ${X ? '<th class="num">Tồn kho</th>' : ''}<th class="num">Số lượng</th><th class="num">${X ? 'Đơn giá bán (-VAT)' : 'Đơn giá (-VAT)'}</th><th class="num">CK (%)</th><th class="num">Thành tiền</th>
+      ${X ? '<th class="num">Tồn kho</th>' : ''}<th class="num">Số lượng</th><th class="num">${X ? 'Đơn giá bán (+VAT)' : 'Đơn giá (+VAT)'}</th><th class="num">${X ? 'Đơn giá bán (-VAT)' : 'Đơn giá (-VAT)'}</th><th class="num">CK (%)</th><th class="num">Thành tiền</th>
       <th class="num">% thuế GTGT</th><th class="num">Tiền thuế</th>
       ${X ? '<th class="num">Đơn giá vốn</th><th class="num">Tiền vốn</th>' : ''}<th></th></tr></thead>
       <tbody id="l-body"></tbody><tfoot id="l-foot"></tfoot></table></div>
@@ -460,6 +502,7 @@ async function pageVoucherForm(type, id) {
       if (p.tax_code) $('#v-head [name=tax_code]').value = p.tax_code;
       $('#partner-hint').innerHTML = '';
     }
+    loadLastPrices().catch((e) => toast(e.message, true));
   }
   function refreshPartnerList() { $('#dl-partners').innerHTML = kindPartners().map((p) => `<option value="${esc(pickLabel(p))}"></option>`).join(''); }
   function nextPartnerCode() {
@@ -486,7 +529,18 @@ async function pageVoucherForm(type, id) {
 
   const byId = (iid) => items.find((i) => i.id == iid);
   const dis = editable ? '' : 'disabled';
+  function lastHint(l) {
+    const lp = suggestOf(l);
+    if (!lp) return '';
+    const g = lp.price_vat != null ? `${fmtN(lp.price_vat)} (+VAT)` : `${fmtN(lp.unit_price)} (-VAT)`;
+    if (lp.source === 'catalog') return `<div class="lp-hint" title="Giá bán khai báo trong danh mục vật tư">Giá danh mục: ${g}</div>`;
+    return `<div class="lp-hint" title="Phiếu ${esc(lp.number)}">Lần trước: ${g} · ${fmtD(lp.date)}</div>`;
+  }
   function renderLines() {
+    // Giữ con trỏ ở đúng ô đang nhập sau khi vẽ lại bảng
+    const ae = document.activeElement;
+    const tr0 = ae && ae.closest ? ae.closest('#l-body tr') : null;
+    const keep = tr0 ? [tr0.dataset.i, ae.dataset.f] : null;
     $('#l-body').innerHTML = lines.map((l, i) => {
       const it = byId(l.item_id);
       const low = X && it && Number(l.qty) > it.stock_qty + 1e-9;
@@ -496,6 +550,7 @@ async function pageVoucherForm(type, id) {
         <td>${esc(it?.name || '')}</td><td>${esc(it?.unit || '')}</td>
         ${X ? `<td class="num" style="${low ? 'color:var(--danger);font-weight:600' : ''}">${it ? fmtN(it.stock_qty, 3) : ''}</td>` : ''}
         <td><input type="number" step="any" data-f="qty" value="${l.qty ?? ''}" ${dis}></td>
+        <td><input type="number" step="any" data-f="price_vat" value="${grossOf(l)}" title="Nhập giá đã có thuế: phần mềm tự tính giá chưa thuế theo % thuế GTGT" ${dis}>${lastHint(l)}</td>
         <td><input type="number" step="any" data-f="unit_price" value="${l.unit_price ?? ''}" ${dis}></td>
         <td><input type="number" step="any" min="0" max="100" data-f="discount_rate" class="w-pct" value="${l.discount_rate || ''}" placeholder="0" ${dis}></td>
         <td><input type="number" step="any" data-f="amount" value="${l.amount ?? ''}" ${dis}></td>
@@ -504,6 +559,7 @@ async function pageVoucherForm(type, id) {
         ${X ? `<td class="num">${l.cost_price != null ? fmtN(l.cost_price) : ''}</td><td class="num">${l.cost_amount != null ? fmtM(l.cost_amount) : ''}</td>` : ''}
         <td>${editable ? `<button class="btn small danger" data-rm="${i}">✕</button>` : ''}</td></tr>`;
     }).join('');
+    if (keep && keep[1]) { const el = $(`#l-body tr[data-i="${keep[0]}"] [data-f="${keep[1]}"]`); if (el) el.focus(); }
     renderFoot();
   }
   function renderFoot() {
@@ -511,7 +567,7 @@ async function pageVoucherForm(type, id) {
     const ta = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
     const tv = lines.reduce((s, l) => s + vatOf(l), 0);
     const tc = lines.reduce((s, l) => s + (Number(l.cost_amount) || 0), 0);
-    $('#l-foot').innerHTML = `<tr><td colspan="${X ? 5 : 4}">Tổng cộng</td><td class="num">${fmtN(tq, 3)}</td><td></td><td></td><td class="num">${fmtM(ta)}</td><td></td><td class="num">${fmtM(tv)}</td>${X ? `<td></td><td class="num">${fmtM(tc)}</td>` : ''}<td></td></tr>`;
+    $('#l-foot').innerHTML = `<tr><td colspan="${X ? 5 : 4}">Tổng cộng</td><td class="num">${fmtN(tq, 3)}</td><td></td><td></td><td></td><td class="num">${fmtM(ta)}</td><td></td><td class="num">${fmtM(tv)}</td>${X ? `<td></td><td class="num">${fmtM(tc)}</td>` : ''}<td></td></tr>`;
     $$('#l-body tr').forEach((tr) => { const c = $('[data-vat]', tr); if (c) c.textContent = fmtM(vatOf(lines[tr.dataset.i])); });
     $('#pay-box').innerHTML = `<div><span>Cộng tiền hàng</span><b>${fmtM(ta)}</b></div><div><span>Tiền thuế GTGT</span><b>${fmtM(tv)}</b></div>
       <div class="total"><span>Tổng tiền thanh toán</span><b>${fmtM(ta + tv)}</b></div><div class="words">Bằng chữ: <i>${esc(moneyWords(ta + tv))}</i></div>`;
@@ -524,24 +580,30 @@ async function pageVoucherForm(type, id) {
       <button class="btn small" data-newitem="${i}">+ Tạo mã mới</button></td></tr>`).join('')}</table></div>` : '';
   }
   renderLines();
+  if (partnerId) loadLastPrices().catch(() => {});
 
   $('#l-body').addEventListener('input', (e) => {
     const tr = e.target.closest('tr'); if (!tr) return;
     const l = lines[tr.dataset.i]; const f = e.target.dataset.f;
-    if (f === 'qty' || f === 'unit_price' || f === 'discount_rate') {
-      l[f] = e.target.value;
-      l.amount = Math.round((Number(l.qty) || 0) * (Number(l.unit_price) || 0) * (1 - (Number(l.discount_rate) || 0) / 100));
-      $('[data-f=amount]', tr).value = l.amount;
-      renderFoot();
-    } else if (f === 'amount') { l.amount = e.target.value; renderFoot(); }
-    else if (f === 'vat_rate') { l.vat_rate = e.target.value; renderFoot(); }
+    // Giá +VAT và giá -VAT tính qua lại theo % thuế GTGT; ô nào người dùng nhập sau cùng là ô gốc
+    if (f === 'price_vat') { l.price_vat = e.target.value; l.mode = 'gross'; }
+    else if (f === 'unit_price') { l.unit_price = e.target.value; l.mode = 'net'; }
+    else if (f === 'qty' || f === 'discount_rate') l[f] = e.target.value;
+    else if (f === 'vat_rate') l.vat_rate = e.target.value;
+    else if (f === 'amount') { l.amount = e.target.value; renderFoot(); return; }
+    else return;
+    recalcLine(l);
+    if (f !== 'unit_price') $('[data-f=unit_price]', tr).value = l.unit_price ?? '';
+    if (f !== 'price_vat') $('[data-f=price_vat]', tr).value = grossOf(l);
+    $('[data-f=amount]', tr).value = l.amount;
+    renderFoot();
   });
   $('#l-body').addEventListener('change', (e) => {
     if (e.target.dataset.f !== 'code') return;
     const l = lines[e.target.closest('tr').dataset.i];
     const it = items.find((i) => i.code.toLowerCase() === e.target.value.trim().toLowerCase());
-    if (it) { l.item_id = it.id; delete l._code; if (!l.vat_rate) l.vat_rate = it.vat_rate || ''; } else { l.item_id = null; l._code = e.target.value; if (e.target.value) toast(`Mã "${e.target.value}" không có trong danh mục`, true); }
-    renderLines();
+    if (it) { l.item_id = it.id; delete l._code; if (!l.vat_rate) { l.vat_rate = it.vat_rate || ''; recalcLine(l); } applyLastPrice(l); } else { l.item_id = null; l._code = e.target.value; if (e.target.value) toast(`Mã "${e.target.value}" không có trong danh mục`, true); }
+    setTimeout(renderLines, 0); // vẽ lại sau khi trình duyệt chuyển xong ô đang nhập
   });
   $('#l-body').addEventListener('click', (e) => {
     const rm = e.target.closest('[data-rm]');
@@ -608,7 +670,7 @@ async function pageVoucherForm(type, id) {
             ${canWrite() ? `<button type="button" class="btn small" data-newpartner="${esc(JSON.stringify({ name: p.partner, tax_code: p.tax_code || '' }))}">+ Thêm vào danh mục ${OBJ}</button>` : ''}</div>`;
         }
         items = await api(`/api/items?date=${head.querySelector('[name=date]').value}&exclude=${id || 0}`);
-        lines = p.lines.map((l) => ({ item_id: l.item_id, qty: l.qty, unit_price: l.unit_price, discount_rate: l.discount_rate || 0, amount: l.amount, vat_rate: l.vat_rate ?? '' }));
+        lines = p.lines.map((l) => ({ item_id: l.item_id, qty: l.qty, unit_price: l.unit_price, mode: 'net', discount_rate: l.discount_rate || 0, amount: l.amount, vat_rate: l.vat_rate ?? '' }));
         if (!lines.length) lines.push({});
         unmatched = p.unmatched || [];
         const warns = [...p.warnings];
@@ -634,7 +696,8 @@ async function pageVoucherForm(type, id) {
     if (unmatched.length && !confirm(`Còn ${unmatched.length} dòng hàng trong PDF chưa gán mã. Vẫn lưu?`)) return;
     delete head.partner_pick;
     if (!partnerId && $('#v-partner-pick').value.trim()) return toast(`"${$('#v-partner-pick').value}" chưa có trong danh mục ${OBJ}. Chọn lại hoặc bấm "+ Mới".`, true);
-    const body = { ...head, partner_id: partnerId, type, source: state.source, attachment: state.attachment, lines: lines.filter((l) => l.item_id) };
+    const body = { ...head, partner_id: partnerId, type, source: state.source, attachment: state.attachment,
+      lines: lines.filter((l) => l.item_id).map((l) => ({ ...l, price_vat: l.mode === 'gross' && l.price_vat !== '' && l.price_vat != null ? Number(l.price_vat) : null })) };
     try {
       const r = await api(id ? `/api/vouchers/${id}` : '/api/vouchers', { method: id ? 'PUT' : 'POST', body });
       toast('Đã lưu chứng từ');
@@ -646,6 +709,27 @@ async function pageVoucherForm(type, id) {
     try { await api(`/api/vouchers/${id}`, { method: 'DELETE' }); toast('Đã xóa'); location.hash = `#/vouchers/${type}`; } catch (err) { toast(err.message, true); }
   });
   $('#v-print')?.addEventListener('click', () => printVoucher(v));
+}
+
+// % thuế dạng số của một dòng (KCT, KKKNT, chưa chọn: 0)
+const vatPct = (l) => (/^\d+$/.test(String(l.vat_rate ?? '')) ? Number(l.vat_rate) : 0);
+const round2 = (n) => Math.round(n * 100) / 100;
+// Đơn giá đã có thuế để hiển thị: giá người dùng nhập (nếu nhập giá +VAT), ngược lại tính từ giá -VAT
+function grossOf(l) {
+  if (l.mode === 'gross' && l.price_vat !== undefined && l.price_vat !== null) return l.price_vat;
+  if (l.unit_price === '' || l.unit_price == null) return '';
+  return round2(Number(l.unit_price) * (1 + vatPct(l) / 100));
+}
+// Tính lại đơn giá và thành tiền của dòng theo ô gốc (giá +VAT hoặc giá -VAT)
+function recalcLine(l) {
+  const q = Number(l.qty) || 0, ck = 1 - (Number(l.discount_rate) || 0) / 100, k = 1 + vatPct(l) / 100;
+  if (l.mode === 'gross' && l.price_vat !== '' && l.price_vat != null) {
+    const g = Number(l.price_vat) || 0;
+    l.unit_price = round2(g / k);
+    l.amount = Math.round(q * g * ck / k); // thành tiền chưa thuế suy từ giá có thuế để tổng thanh toán khớp giá đã nhập
+  } else {
+    l.amount = Math.round(q * (Number(l.unit_price) || 0) * ck);
+  }
 }
 
 // Tiền thuế GTGT của một dòng (KCT, KKKNT, chưa chọn: 0)
@@ -724,7 +808,7 @@ function voucherPaperHtml(v) {
       <th>Đơn giá (+VAT)</th><th>Đơn giá (-VAT)</th><th>Thành tiền</th><th style="width:42px">Tỷ lệ CK (%)</th><th style="width:44px">% thuế GTGT</th></tr></thead><tbody>
     ${v.lines.map((l, i) => {
       const r = String(l.vat_rate ?? '');
-      const withVat = /^\d+$/.test(r) ? l.unit_price * (1 + Number(r) / 100) : l.unit_price;
+      const withVat = l.price_vat != null ? l.price_vat : /^\d+$/.test(r) ? l.unit_price * (1 + Number(r) / 100) : l.unit_price;
       return `<tr><td class="c">${i + 1}</td><td>${esc(l.code)}</td><td>${esc(l.name)}</td><td class="c">${esc(l.unit)}</td><td class="c">${esc(v.warehouse || '')}</td>
         <td class="r">${fmtN(l.qty, 3)}</td><td class="r">${f2(withVat)}</td><td class="r">${f2(l.unit_price)}</td><td class="r">${fmtM(l.amount)}</td>
         <td class="r">${f2(l.discount_rate)}</td><td class="r">${esc(vatTxt(l.vat_rate))}</td></tr>`;
