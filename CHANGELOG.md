@@ -1,5 +1,15 @@
 # Lịch sử phiên bản
 
+## 1.4.0
+- Giao diện mới theo phong cách phần mềm kế toán doanh nghiệp: thanh trên màu trắng, menu trái có biểu tượng (thu gọn được), bảng kẻ ô gọn gàng, tự chuyển nền tối theo máy.
+- Báo cáo nhập – xuất – tồn: cố định dòng tiêu đề, thêm dòng lọc theo từng cột (gõ không dấu; cột số gõ >0, <100, =5…), dòng tổng tự tính theo dòng đang hiện.
+- Sổ chi tiết vật tư: chọn nhiều mặt hàng cùng lúc, có bảng tổng hợp và sổ chi tiết từng mã.
+- Báo cáo mới: Bán hàng theo mặt hàng (theo khoảng ngày, khách hàng, nhiều mặt hàng; doanh thu, giá vốn, lãi gộp, chi tiết từng lần bán).
+- Tổng hợp theo đối tượng: tìm kiếm, lọc từng cột, cố định tiêu đề.
+- Nhật ký từng chứng từ: ai tạo, xem, sửa, ghi sổ/bỏ ghi, xóa, thời gian, địa chỉ IP.
+- Thủ kho chỉ xem, tra cứu; máy chủ chặn mọi thao tác nhập liệu, sửa, quản trị.
+- Bảo mật: chặn IP đăng nhập sai nhiều lần, không dò được tên đăng nhập, mật khẩu mạnh hơn (không chứa tên đăng nhập), chặn đăng nhập qua Internet khi còn mật khẩu ban đầu, chống giả mạo yêu cầu từ trang khác, chính sách nội dung (CSP).
+
 ## 1.3.0
 - Truy cập từ Internet bằng tên miền riêng qua Cloudflare Tunnel: Cài đặt → Truy cập từ Internet, dán token đường hầm từ Cloudflare. Phần mềm tự tải cloudflared, tự chạy đường hầm mỗi khi mở, hiện trạng thái kết nối.
 - Nhận biết truy cập qua Cloudflare: cookie đăng nhập chỉ gửi qua HTTPS, nhật ký ghi IP thật của người dùng.

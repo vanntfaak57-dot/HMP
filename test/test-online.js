@@ -43,15 +43,20 @@ const waitFor = async (fn, ms = 15000) => { const t0 = Date.now(); for (;;) { co
     await start();
     // 1. Truy cập qua Cloudflare: cloudflared trên máy này gửi kèm header CF-Connecting-IP / X-Forwarded-Proto
     const CF = { 'cf-connecting-ip': '203.0.113.9', 'x-forwarded-for': '203.0.113.9', 'x-forwarded-proto': 'https' };
+    // tài khoản còn mật khẩu ban đầu: không cho đăng nhập từ Internet
     let r = await raw('/api/login', { method: 'POST', body: { username: 'admin', password: 'admin@123' }, headers: CF });
+    assert.equal(r.status, 403); assert.match(r.d.error, /mật khẩu ban đầu/);
+    await ok('/api/login', { method: 'POST', body: { username: 'admin', password: 'admin@123' } });
+    await ok('/api/me/password', { method: 'POST', body: { old_password: 'admin@123', new_password: 'MatKhau2026' } });
+    cookie = '';
+    r = await raw('/api/login', { method: 'POST', body: { username: 'admin', password: 'MatKhau2026' }, headers: CF });
     assert.equal(r.status, 200); assert.match(r.headers.get('set-cookie'), /; Secure/); assert.ok(r.headers.get('strict-transport-security'));
-    await ok('/api/me/password', { method: 'POST', body: { old_password: 'admin@123', new_password: 'MatKhau2026' }, headers: CF });
     cookie = '';
     r = await raw('/api/login', { method: 'POST', body: { username: 'admin', password: 'MatKhau2026' } });
     assert.doesNotMatch(r.headers.get('set-cookie'), /Secure/); // truy cập trực tiếp trên máy / mạng nội bộ (http)
     const au = await ok('/api/audit');
     assert.ok(au.rows.some((a) => a.action === 'LOGIN_OK' && a.ip === '203.0.113.9'), 'ghi IP thật của người dùng qua Cloudflare');
-    step('Qua Cloudflare: cookie bảo mật (Secure) + HSTS, nhật ký ghi IP thật 203.0.113.9; truy cập http trên máy vẫn bình thường');
+    step('Qua Cloudflare: chặn đăng nhập khi còn mật khẩu ban đầu; cookie bảo mật (Secure) + HSTS, nhật ký ghi IP thật 203.0.113.9; truy cập http trên máy vẫn bình thường');
 
     // 2. Đường hầm Cloudflare Tunnel
     let t = await ok('/api/tunnel');

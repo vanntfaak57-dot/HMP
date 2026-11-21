@@ -69,6 +69,16 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'");
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  // Yêu cầu ghi dữ liệu phải xuất phát từ chính trang của phần mềm
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.headers.origin) {
+    let host = '';
+    try { host = new URL(req.headers.origin).host; } catch { host = 'x'; }
+    const fwdHost = auth.viaProxy(req) ? String(req.headers['x-forwarded-host'] || '').split(',')[0].trim() : '';
+    if (host !== req.headers.host && host !== fwdHost) return res.status(403).json({ error: 'Yêu cầu không hợp lệ (khác nguồn)' });
+  }
   if (process.env.COOKIE_SECURE === '1' || auth.isHttps(req)) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
   next();
 });
@@ -137,8 +147,9 @@ app.get('/api/me', (req, res) => res.json({
 app.post('/api/me/password', h((req, res) => {
   const { old_password, new_password } = req.body || {};
   if (!auth.verifyPassword(String(old_password || ''), req.user.password_hash)) throw fail('Mật khẩu hiện tại không đúng');
-  const err = auth.validatePassword(new_password);
+  const err = auth.validatePassword(new_password, req.user.username);
   if (err) throw fail(err);
+  if (auth.verifyPassword(String(new_password), req.user.password_hash)) throw fail('Mật khẩu mới phải khác mật khẩu hiện tại');
   db.prepare('UPDATE users SET password_hash = ?, must_change = 0 WHERE id = ?').run(auth.hashPassword(new_password), req.user.id);
   db.prepare('DELETE FROM sessions WHERE user_id = ? AND token <> ?').run(req.user.id, req.sessionToken);
   audit(req, 'PASSWORD_CHANGE', 'Đổi mật khẩu');
@@ -722,9 +733,25 @@ function getVoucher(id) {
     WHERE l.voucher_id = ? ORDER BY l.sort, l.id`).all(id);
   return v;
 }
+const viewLogged = new Map();
+app.get('/api/vouchers/:id/audit', h((req, res) => {
+  const v = db.prepare('SELECT id, number, type FROM vouchers WHERE id = ?').get(req.params.id);
+  if (!v) throw fail('Không tìm thấy chứng từ', 404);
+  // nhật ký gắn với chứng từ; bản ghi cũ (trước khi có liên kết) tìm theo số phiếu
+  const rows = db.prepare(`SELECT ts, username, action, detail, ip, ua FROM audit_log
+    WHERE ref = ? OR (ref IS NULL AND action LIKE 'VOUCHER_%' AND detail LIKE ?) ORDER BY id DESC LIMIT 300`)
+    .all('voucher:' + v.id, `%${TYPE_NAME[v.type]} ${v.number} %`);
+  res.json(roles.canSeeValues(req.user.role) ? rows : rows.map((r) => ({ ...r, detail: r.detail.replace(/tổng [\d.,]+/g, 'tổng ***').replace(/\| trước khi sửa:.*$/, '') })));
+}));
 app.get('/api/vouchers/:id', h((req, res) => {
   const v = getVoucher(req.params.id);
   if (!v) throw fail('Không tìm thấy chứng từ', 404);
+  const key = req.user.id + ':' + v.id;
+  if (!viewLogged.has(key) || Date.now() - viewLogged.get(key) > 10 * 60 * 1000) {
+    viewLogged.set(key, Date.now());
+    if (viewLogged.size > 20000) viewLogged.clear();
+    audit(req, 'VOUCHER_VIEW', `Xem ${TYPE_NAME[v.type]} ${v.number}`, null, 'voucher:' + v.id);
+  }
   res.json(v);
 }));
 
@@ -797,7 +824,7 @@ app.post('/api/vouchers', canWrite, h((req, res) => {
     costing.markDirty(v.date.slice(0, 7));
     return id;
   });
-  audit(req, 'VOUCHER_CREATE', summary(v) + (v.source === 'pdf' ? ' (từ PDF)' : ''));
+  audit(req, 'VOUCHER_CREATE', summary(v) + (v.source === 'pdf' ? ' (từ PDF)' : ''), null, 'voucher:' + id);
   res.json({ id });
 }));
 
@@ -818,8 +845,8 @@ app.put('/api/vouchers/:id', canWrite, h((req, res) => {
     costing.checkNoNegative([...v.lines.map((l) => l.item_id), ...old.lines.map((l) => l.item_id)]);
     costing.markDirty((old.date < v.date ? old.date : v.date).slice(0, 7));
   });
-  audit(req, 'VOUCHER_UPDATE', `${summary(v)} | trước khi sửa: ${summary(old)}`);
-  audit(req, 'VOUCHER_POST', `Ghi sổ ${TYPE_NAME[v.type]} ${v.number}`);
+  audit(req, 'VOUCHER_UPDATE', `${summary(v)} | trước khi sửa: ${summary(old)}`, null, 'voucher:' + old.id);
+  audit(req, 'VOUCHER_POST', `Ghi sổ ${TYPE_NAME[v.type]} ${v.number}`, null, 'voucher:' + old.id);
   res.json({ ok: true });
 }));
 
@@ -832,7 +859,7 @@ app.delete('/api/vouchers/:id', canWrite, h((req, res) => {
     costing.checkNoNegative(old.lines.map((l) => l.item_id));
     costing.markDirty(old.date.slice(0, 7));
   });
-  audit(req, 'VOUCHER_DELETE', summary(old));
+  audit(req, 'VOUCHER_DELETE', summary(old), null, 'voucher:' + old.id);
   res.json({ ok: true });
 }));
 
@@ -846,7 +873,7 @@ function setPosted(v, post, req) {
     costing.checkNoNegative(v.lines.map((l) => l.item_id));
     costing.markDirty(v.date.slice(0, 7));
   });
-  audit(req, post ? 'VOUCHER_POST' : 'VOUCHER_UNPOST', `${post ? 'Ghi sổ' : 'Bỏ ghi'} ${TYPE_NAME[v.type]} ${v.number} ngày ${v.date}`);
+  audit(req, post ? 'VOUCHER_POST' : 'VOUCHER_UNPOST', `${post ? 'Ghi sổ' : 'Bỏ ghi'} ${TYPE_NAME[v.type]} ${v.number} ngày ${v.date}`, null, 'voucher:' + v.id);
   return true;
 }
 app.post('/api/vouchers/:id/post', canWrite, h((req, res) => {
@@ -890,7 +917,7 @@ app.post('/api/vouchers/bulk-delete', canWrite, h((req, res) => {
         costing.markDirty(v.date.slice(0, 7));
       });
       deleted.push(v.number);
-      audit(req, 'VOUCHER_DELETE', summary(v) + ' (xóa hàng loạt)');
+      audit(req, 'VOUCHER_DELETE', summary(v) + ' (xóa hàng loạt)', null, 'voucher:' + v.id);
     } catch (e) {
       skipped.push({ number: v.number, date: v.date, reason: e.message });
     }
@@ -1045,25 +1072,43 @@ app.get('/api/reports/nxt.xlsx', h(async (req, res) => {
 }));
 
 // Sổ chi tiết vật tư hàng hóa
-app.get('/api/reports/ledger', h((req, res) => {
-  const { from, to } = reportRange(req.query);
-  const it = db.prepare('SELECT * FROM items WHERE id = ?').get(req.query.item_id);
-  if (!it) throw fail('Chọn mã hàng');
-  const comp = costing.compute(to);
+// Sổ chi tiết vật tư: một hoặc nhiều mặt hàng (item_ids=1,2,3)
+function ledgerFor(it, from, to, comp) {
   const first = comp.months[from]?.rows.get(it.id);
   const lines = db.prepare(`SELECT l.id, l.qty, l.unit_price, l.amount, v.id voucher_id, v.type, v.number, v.date, v.partner, v.description
     FROM voucher_lines l JOIN vouchers v ON v.id = l.voucher_id
     WHERE l.item_id = ? AND v.posted = 1 AND substr(v.date,1,7) BETWEEN ? AND ? ORDER BY v.date, v.type, v.id, l.sort`).all(it.id, from, to);
   let bq = first ? first.open_qty : 0, bv = first ? first.open_val : 0;
+  let iq = 0, iv = 0, oq = 0, ov = 0;
   const out = lines.map((l) => {
     const m = l.date.slice(0, 7);
     let price, value;
-    if (l.type === 'N') { price = l.unit_price; value = l.amount; bq += l.qty; bv += l.amount; }
-    else { const c = comp.months[m].lineCosts.get(l.id); price = c.cost_price; value = c.cost_amount; bq -= l.qty; bv -= value; }
+    if (l.type === 'N') { price = l.unit_price; value = l.amount; bq += l.qty; bv += l.amount; iq += l.qty; iv += l.amount; }
+    else { const c = comp.months[m].lineCosts.get(l.id); price = c.cost_price; value = c.cost_amount; bq -= l.qty; bv -= value; oq += l.qty; ov += value; }
     return { ...l, price, value, bal_qty: bq, bal_val: bv };
   });
   const months = Object.keys(comp.months).filter((m) => m >= from && m <= to).map((m) => ({ month: m, ...comp.months[m].rows.get(it.id) }));
-  res.json({ item: it, from, to, open_qty: first?.open_qty || 0, open_val: first?.open_val || 0, lines: out, months });
+  return { item: it, from, to, open_qty: first?.open_qty || 0, open_val: first?.open_val || 0, in_qty: iq, in_val: iv, out_qty: oq, out_val: ov, close_qty: bq, close_val: bv, lines: out, months };
+}
+app.get('/api/reports/ledger', h((req, res) => {
+  const { from, to } = reportRange(req.query);
+  const ids = String(req.query.item_ids || req.query.item_id || '').split(',').map(Number).filter(Number.isInteger).slice(0, 500);
+  const items = ids.map((id) => db.prepare('SELECT * FROM items WHERE id = ?').get(id)).filter(Boolean);
+  if (!items.length) throw fail('Chọn ít nhất một mã hàng');
+  const comp = costing.compute(to);
+  if (req.query.item_id && !req.query.item_ids) return res.json(ledgerFor(items[0], from, to, comp));
+  res.json({ from, to, ledgers: items.map((it) => ledgerFor(it, from, to, comp)) });
+}));
+
+// Báo cáo bán hàng theo mặt hàng (nhiều mặt hàng, lọc theo khách hàng, khoảng ngày)
+app.get('/api/reports/sales', h((req, res) => {
+  const fm = costing.firstMonth();
+  if (!fm) throw fail('Chưa thiết lập ngày chốt số dư đầu kỳ');
+  const from = isDate(req.query.from) ? req.query.from : costing.addDays(getSetting('opening_date'), 1);
+  const to = isDate(req.query.to) ? req.query.to : now().slice(0, 10);
+  if (to < from) throw fail('Khoảng ngày không hợp lệ');
+  const ids = String(req.query.item_ids || '').split(',').map(Number).filter(Number.isInteger);
+  res.json(analytics.salesByItem(analyticsCtx(), from, to, { itemIds: ids, partnerKey: String(req.query.partner || '') }));
 }));
 
 function analyticsCtx() {
@@ -1119,7 +1164,7 @@ app.get('/api/users', adminOnly, (req, res) => {
 app.post('/api/users', adminOnly, h((req, res) => {
   const b = req.body || {};
   if (!/^[a-zA-Z0-9._-]{3,32}$/.test(b.username || '')) throw fail('Tên đăng nhập 3-32 ký tự, chỉ gồm chữ, số, dấu . _ -');
-  const err = auth.validatePassword(b.password);
+  const err = auth.validatePassword(b.password, b.username);
   if (err) throw fail(err);
   if (!roles.ROLES[b.role]) throw fail('Vai trò không hợp lệ');
   if (db.prepare('SELECT id FROM users WHERE username = ?').get(b.username)) throw fail('Tên đăng nhập đã tồn tại');
@@ -1142,7 +1187,7 @@ app.put('/api/users/:id', adminOnly, h((req, res) => {
     changes.push(b.active ? 'mở khóa' : 'khóa tài khoản');
   }
   if (b.password) {
-    const err = auth.validatePassword(b.password);
+    const err = auth.validatePassword(b.password, u.username);
     if (err) throw fail(err);
     db.prepare('UPDATE users SET password_hash = ?, must_change = 1, failed_count = 0, locked_until = NULL WHERE id = ?').run(auth.hashPassword(b.password), u.id);
     db.prepare('DELETE FROM sessions WHERE user_id = ?').run(u.id);

@@ -29,7 +29,7 @@ Biến môi trường tùy chọn: `PORT` (mặc định 3000), `HOST` (mặc đ
    - **Ghi sổ / Bỏ ghi** (áp dụng cho cả phiếu nhập và phiếu xuất): bấm *Cất & ghi sổ* là chứng từ được ghi sổ và chỉ xem được. Muốn sửa phải bấm **Bỏ ghi**: trong thời gian chưa ghi sổ, chứng từ không được tính vào tồn kho, giá vốn, báo cáo và gợi ý giá; sửa xong bấm *Cất & ghi sổ*. Danh sách phiếu có cột trạng thái và nút ghi sổ / bỏ ghi hàng loạt. Không bỏ ghi được nếu kỳ đã khóa sổ hoặc việc bỏ ghi làm âm kho.
    - Hệ thống chặn chứng từ trước ngày A, chặn xuất âm kho, chặn trùng số phiếu.
 5. **Tính giá xuất kho** → chọn tháng, bấm *Tính giá đến kỳ này*. Giá vốn được ghi vào từng dòng phiếu xuất.
-6. **Báo cáo**: Dashboard phân tích (doanh thu, giá vốn, lãi gộp, nhập kho, tồn kho theo tháng; top khách hàng, mặt hàng, nhà cung cấp), Tổng hợp nhập-xuất-tồn (xuất Excel, in), Sổ chi tiết vật tư, Tổng hợp theo đối tượng (bán hàng theo khách hàng có lãi gộp, mua hàng theo nhà cung cấp; bấm vào tên để xem chi tiết theo mặt hàng và chứng từ).
+6. **Báo cáo**: Dashboard phân tích (doanh thu, giá vốn, lãi gộp, nhập kho, tồn kho theo tháng; top khách hàng, mặt hàng, nhà cung cấp), Tổng hợp nhập-xuất-tồn (xuất Excel, in), Sổ chi tiết vật tư (chọn nhiều mặt hàng), Bán hàng theo mặt hàng, Tổng hợp theo đối tượng (bán hàng theo khách hàng có lãi gộp, mua hàng theo nhà cung cấp; bấm vào tên để xem chi tiết theo mặt hàng và chứng từ).
 7. **Khóa sổ** (admin) kỳ đã tính giá để không ai sửa/xóa chứng từ trong kỳ.
 
 ## Cách tính giá vốn
@@ -44,13 +44,15 @@ Trên phiếu xuất: *Đơn giá bán / Doanh thu* là giá bán (lấy từ PD
 
 ## Bảo mật & nhật ký
 
-- Mật khẩu mã hóa scrypt; tối thiểu 8 ký tự gồm chữ và số; nhập sai 5 lần khóa 15 phút; phiên hết hạn sau 8 giờ không hoạt động.
+- Mật khẩu mã hóa scrypt; tối thiểu 8 ký tự gồm chữ và số, không chứa tên đăng nhập; nhập sai 5 lần khóa 15 phút; một IP sai 20 lần bị chặn 15 phút; thông báo lỗi không tiết lộ tên đăng nhập có tồn tại; phiên hết hạn sau 8 giờ không hoạt động.
+- Truy cập qua Internet: không cho đăng nhập khi còn mật khẩu ban đầu; cookie chỉ gửi qua HTTPS; chặn yêu cầu giả mạo từ trang khác; chính sách nội dung (CSP). Nên bật thêm Cloudflare Access cho tên miền.
+- File sao lưu chứa mật khẩu đã mã hóa và token Cloudflare: cất giữ riêng tư.
 - Vai trò (chỉ **Quản trị** được thêm / sửa người dùng):
   - **Quản trị**: toàn quyền.
   - **Kế toán**: xem toàn bộ dữ liệu, nhập liệu, tính giá.
-  - **Thủ kho**: chỉ xem **số lượng** (danh mục, phiếu, nhập-xuất-tồn, sổ chi tiết, mẫu in số lượng); mọi giá trị tiền bị máy chủ loại bỏ, không xem được dashboard phân tích, báo cáo theo đối tượng, giá gần nhất, file PDF gốc.
+  - **Thủ kho**: chỉ xem **số lượng** (danh mục, phiếu, nhập-xuất-tồn, sổ chi tiết, bán hàng theo mặt hàng, mẫu in số lượng), **không được nhập liệu, sửa, xóa**; mọi giá trị tiền bị máy chủ loại bỏ, không xem được dashboard phân tích, báo cáo theo đối tượng, giá gần nhất, file PDF gốc.
   - **Chỉ xem**: xem toàn bộ, không sửa.
-- **Nhật ký truy cập** ghi: đăng nhập thành công/thất bại, đăng xuất, đổi mật khẩu, thêm/sửa/xóa mã hàng và chứng từ (kèm nội dung trước khi sửa), tải PDF, tính giá, khóa sổ, xuất báo cáo — kèm thời gian, IP, trình duyệt. Trang *Người dùng* hiển thị các phiên đang đăng nhập.
+- **Nhật ký truy cập** ghi: đăng nhập thành công/thất bại, đăng xuất, đổi mật khẩu, thêm/sửa/xóa mã hàng và chứng từ (kèm nội dung trước khi sửa), tải PDF, tính giá, khóa sổ, xuất báo cáo — kèm thời gian, IP, trình duyệt. Mỗi chứng từ có mục **Nhật ký chứng từ** (ai tạo, xem, sửa, ghi sổ/bỏ ghi, xóa). Trang *Người dùng* hiển thị các phiên đang đăng nhập.
 
 ## Sao lưu
 

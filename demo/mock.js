@@ -99,8 +99,8 @@
   try { currentSid = sessionStorage.getItem(SID_KEY); } catch { /* bỏ qua */ }
   const UA = navigator.userAgent.slice(0, 300);
   const IP = 'trình duyệt demo';
-  function audit(user, action, detail) {
-    D.audit.push({ id: nextId('audit'), ts: now(), user_id: user?.id ?? null, username: user?.username ?? null, action, detail, ip: IP, ua: UA });
+  function audit(user, action, detail, ref = null) {
+    D.audit.push({ id: nextId('audit'), ts: now(), user_id: user?.id ?? null, username: user?.username ?? null, action, detail, ip: IP, ua: UA, ref });
     save();
   }
   function currentUser() {
@@ -619,7 +619,20 @@
           uncosted: ls.filter((l) => l.cost_amount == null).length, period_status: p?.status || null, locked: p?.locked ? 1 : 0 };
       });
   });
-  R('GET', '/api/vouchers/:id', ({ params }) => { const v = getVoucher(params.id); if (!v) throw fail('Không tìm thấy chứng từ', 404); return v; });
+  const viewLogged = new Map();
+  R('GET', '/api/vouchers/:id/audit', ({ user, params }) => {
+    const v = getVoucher(params.id); if (!v) throw fail('Không tìm thấy chứng từ', 404);
+    const key = `${TYPE_NAME[v.type]} ${v.number} `;
+    const rows = D.audit.filter((a) => a.ref === 'voucher:' + v.id || (!a.ref && String(a.action).startsWith('VOUCHER_') && String(a.detail).includes(key)))
+      .sort((a, b) => b.id - a.id).slice(0, 300).map(({ ts, username, action, detail, ip, ua }) => ({ ts, username, action, detail, ip, ua }));
+    return window.KhoRoles.canSeeValues(user.role) ? rows : rows.map((r) => ({ ...r, detail: r.detail.replace(/tổng [\d.,]+/g, 'tổng ***').replace(/\| trước khi sửa:.*$/, '') }));
+  });
+  R('GET', '/api/vouchers/:id', ({ user, params }) => {
+    const v = getVoucher(params.id); if (!v) throw fail('Không tìm thấy chứng từ', 404);
+    const k = user.id + ':' + v.id;
+    if (!viewLogged.has(k) || Date.now() - viewLogged.get(k) > 600000) { viewLogged.set(k, Date.now()); audit(user, 'VOUCHER_VIEW', `Xem ${TYPE_NAME[v.type]} ${v.number}`, 'voucher:' + v.id); }
+    return v;
+  });
   R('POST', '/api/vouchers', ({ user, body }) => { W(user);
     const v = validateVoucher(body);
     if (body.auto_number === true) v.number = nextNumber(v.type);
@@ -630,7 +643,7 @@
       insertLines(id, lines); checkNoNegative(lines.map((l) => l.item_id)); markDirty(v.date.slice(0, 7));
       return id;
     });
-    audit(user, 'VOUCHER_CREATE', summary(v) + (v.source === 'pdf' ? ' (từ PDF)' : '')); return { id };
+    audit(user, 'VOUCHER_CREATE', summary(v) + (v.source === 'pdf' ? ' (từ PDF)' : ''), 'voucher:' + id); return { id };
   });
   R('PUT', '/api/vouchers/:id', ({ user, params, body }) => { W(user);
     const old = getVoucher(params.id); if (!old) throw fail('Không tìm thấy chứng từ', 404);
@@ -645,14 +658,14 @@
       checkNoNegative([...lines.map((l) => l.item_id), ...old.lines.map((l) => l.item_id)]);
       markDirty((old.date < v.date ? old.date : v.date).slice(0, 7));
     });
-    audit(user, 'VOUCHER_UPDATE', `${summary(v)} | trước khi sửa: ${summary(old)}`);
-    audit(user, 'VOUCHER_POST', `Ghi sổ ${TYPE_NAME[v.type]} ${v.number}`); return { ok: true };
+    audit(user, 'VOUCHER_UPDATE', `${summary(v)} | trước khi sửa: ${summary(old)}`, 'voucher:' + old.id);
+    audit(user, 'VOUCHER_POST', `Ghi sổ ${TYPE_NAME[v.type]} ${v.number}`, 'voucher:' + old.id); return { ok: true };
   });
   R('DELETE', '/api/vouchers/:id', ({ user, params }) => { W(user);
     const old = getVoucher(params.id); if (!old) throw fail('Không tìm thấy chứng từ', 404);
     if (old.locked) throw fail(`Kỳ ${old.date.slice(0, 7)} đã khóa sổ`);
     tx(() => { D.vouchers = D.vouchers.filter((x) => x.id !== old.id); D.lines = D.lines.filter((l) => l.voucher_id !== old.id); checkNoNegative(old.lines.map((l) => l.item_id)); markDirty(old.date.slice(0, 7)); });
-    audit(user, 'VOUCHER_DELETE', summary(old)); return { ok: true };
+    audit(user, 'VOUCHER_DELETE', summary(old), 'voucher:' + old.id); return { ok: true };
   });
 
   function setPosted(v, post, user) {
@@ -664,7 +677,7 @@
       if (!post) D.lines.filter((l) => l.voucher_id === v.id).forEach((l) => { l.cost_price = null; l.cost_amount = null; });
       checkNoNegative(v.lines.map((l) => l.item_id)); markDirty(v.date.slice(0, 7));
     });
-    audit(user, post ? 'VOUCHER_POST' : 'VOUCHER_UNPOST', `${post ? 'Ghi sổ' : 'Bỏ ghi'} ${TYPE_NAME[v.type]} ${v.number} ngày ${v.date}`);
+    audit(user, post ? 'VOUCHER_POST' : 'VOUCHER_UNPOST', `${post ? 'Ghi sổ' : 'Bỏ ghi'} ${TYPE_NAME[v.type]} ${v.number} ngày ${v.date}`, 'voucher:' + v.id);
     return true;
   }
   R('POST', '/api/vouchers/:id/post', ({ user, params, body }) => { W(user);
@@ -703,7 +716,7 @@
       if (v.locked) { skipped.push({ number: v.number, date: v.date, reason: `Kỳ ${v.date.slice(5, 7)}/${v.date.slice(0, 4)} đã khóa sổ` }); continue; }
       try {
         tx(() => { D.vouchers = D.vouchers.filter((x) => x.id !== v.id); D.lines = D.lines.filter((l) => l.voucher_id !== v.id); checkNoNegative(v.lines.map((l) => l.item_id)); markDirty(v.date.slice(0, 7)); });
-        deleted.push(v.number); audit(user, 'VOUCHER_DELETE', summary(v) + ' (xóa hàng loạt)');
+        deleted.push(v.number); audit(user, 'VOUCHER_DELETE', summary(v) + ' (xóa hàng loạt)', 'voucher:' + v.id);
       } catch (e) { skipped.push({ number: v.number, date: v.date, reason: e.message }); }
     }
     return { deleted, skipped };
@@ -757,10 +770,28 @@
   });
 
   R('GET', '/api/reports/nxt', ({ query }) => { const { from, to } = reportRange(query); return nxtReport(from, to); });
+  R('GET', '/api/reports/sales', ({ query }) => {
+    const fm = firstMonth(); if (!fm) throw fail('Chưa thiết lập ngày chốt số dư đầu kỳ');
+    const isD = (x) => /^\d{4}-\d{2}-\d{2}$/.test(String(x || ''));
+    const from = isD(query.from) ? query.from : fm + '-01'; const to = isD(query.to) ? query.to : now().slice(0, 10);
+    if (to < from) throw fail('Khoảng ngày không hợp lệ');
+    const ids = String(query.item_ids || '').split(',').filter(Boolean).map(Number).filter(Number.isInteger);
+    return window.KhoAnalytics.salesByItem(analyticsCtx(), from, to, { itemIds: ids, partnerKey: String(query.partner || '') });
+  });
   R('GET', '/api/reports/ledger', ({ query }) => {
     const { from, to } = reportRange(query);
+    if (query.item_ids !== undefined) {
+      const ids = String(query.item_ids).split(',').filter(Boolean).map(Number);
+      const items = D.items.filter((i) => ids.includes(i.id)).sort((a, b) => cmp(a.code, b.code));
+      if (!items.length) throw fail('Chọn mã hàng');
+      const comp = compute(to);
+      return { from, to, ledgers: items.map((it) => ledgerFor(it, from, to, comp)) };
+    }
     const it = D.items.find((i) => i.id === Number(query.item_id)); if (!it) throw fail('Chọn mã hàng');
-    const comp = compute(to); const first = comp.months[from]?.rows.get(it.id);
+    return ledgerFor(it, from, to, compute(to));
+  });
+  function ledgerFor(it, from, to, comp) {
+    const first = comp.months[from]?.rows.get(it.id);
     const lines = D.lines.filter((l) => l.item_id === it.id).map((l) => ({ l, v: voucherOf(l) }))
       .filter(({ v }) => v.posted !== 0 && v.date.slice(0, 7) >= from && v.date.slice(0, 7) <= to)
       .sort((a, b) => cmp(a.v.date, b.v.date) || cmp(a.v.type, b.v.type) || a.v.id - b.v.id || a.l.sort - b.l.sort);
@@ -772,8 +803,10 @@
       return { id: l.id, qty: l.qty, unit_price: l.unit_price, amount: l.amount, voucher_id: v.id, type: v.type, number: v.number, date: v.date, partner: v.partner, description: v.description, price, value, bal_qty: bq, bal_val: bv };
     });
     const months = Object.keys(comp.months).filter((m) => m >= from && m <= to).map((m) => ({ month: m, ...comp.months[m].rows.get(it.id) }));
-    return { item: it, from, to, open_qty: first?.open_qty || 0, open_val: first?.open_val || 0, lines: out, months };
-  });
+    const sum = (t, k) => out.filter((x) => x.type === t).reduce((a, x) => a + (x[k] || 0), 0);
+    return { item: it, from, to, open_qty: first?.open_qty || 0, open_val: first?.open_val || 0, lines: out, months,
+      in_qty: sum('N', 'qty'), in_val: sum('N', 'value'), out_qty: sum('X', 'qty'), out_val: sum('X', 'value'), close_qty: bq, close_val: bv };
+  }
   R('GET', '/api/dashboard', () => {
     const fm = firstMonth(); const cur = now().slice(0, 7); let stock = null;
     if (fm) {

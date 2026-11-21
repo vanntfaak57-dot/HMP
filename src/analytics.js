@@ -125,5 +125,31 @@
     };
   }
 
-  return { partnerSummary, partnerDetail, dashboard, partnerKey, NO_PARTNER };
+  // Bán hàng theo mặt hàng: tổng hợp từng mặt hàng + chi tiết từng dòng bán
+  function salesByItem(ctx, fromDate, toDate, opts = {}) {
+    const ids = new Set((opts.itemIds || []).filter(Boolean));
+    const comp = ctx.compute(toDate.slice(0, 7));
+    const map = new Map();
+    for (const l of ctx.lines) {
+      if (l.v.type !== 'X' || l.v.date < fromDate || l.v.date > toDate) continue;
+      if (ids.size && !ids.has(l.item_id)) continue;
+      if (opts.partnerKey && partnerKey(l.v) !== opts.partnerKey) continue;
+      const it = ctx.items.find((i) => i.id === l.item_id) || { code: '?', name: '?', unit: '' };
+      const p = partnerInfo(ctx, l.v);
+      const cost = costOf(comp, l);
+      if (!map.has(l.item_id)) map.set(l.item_id, { item_id: l.item_id, code: it.code, name: it.name, unit: it.unit, qty: 0, amount: 0, cost: 0, vouchers: new Set(), customers: new Set(), lines: [] });
+      const r = map.get(l.item_id);
+      r.qty += l.qty; r.amount += l.amount; r.cost += cost; r.vouchers.add(l.v.id); r.customers.add(p.key);
+      r.lines.push({ date: l.v.date, voucher_id: l.v.id, number: l.v.number, partner: p.name, partner_code: p.code, qty: l.qty, unit_price: l.qty ? l.amount / l.qty : 0, amount: l.amount, cost, profit: l.amount - cost });
+    }
+    const rows = [...map.values()].map((r) => ({
+      item_id: r.item_id, code: r.code, name: r.name, unit: r.unit, qty: r.qty, amount: r.amount, cost: r.cost, profit: r.amount - r.cost,
+      avg_price: r.qty ? r.amount / r.qty : 0, voucher_count: r.vouchers.size, customer_count: r.customers.size,
+      lines: r.lines.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.voucher_id - b.voucher_id)),
+    })).sort((a, b) => b.amount - a.amount);
+    const total = rows.reduce((t, r) => ({ qty: t.qty + r.qty, amount: t.amount + r.amount, cost: t.cost + r.cost, profit: t.profit + r.profit }), { qty: 0, amount: 0, cost: 0, profit: 0 });
+    return { from: fromDate, to: toDate, rows, total };
+  }
+
+  return { partnerSummary, partnerDetail, dashboard, salesByItem, partnerKey, NO_PARTNER };
 });

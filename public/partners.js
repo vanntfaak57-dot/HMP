@@ -132,7 +132,7 @@ function defaultRange(key) {
 async function pageReportPartners() {
   const q = defaultRange('rpt-partners');
   q.kind = q.kind || 'KH';
-  $('#main').innerHTML = `<h1>Tổng hợp theo đối tượng</h1>
+  $('#main').innerHTML = `<div class="page-head"><h1>Tổng hợp theo đối tượng</h1></div>
     <div class="toolbar">
       <div class="seg" role="tablist"><button class="btn" data-kind="KH" role="tab">Bán hàng theo khách hàng</button><button class="btn" data-kind="NCC" role="tab">Mua hàng theo nhà cung cấp</button></div>
       ${rangeControls('rp', q)} <button class="btn primary" id="rp-go">Xem</button>
@@ -144,15 +144,16 @@ async function pageReportPartners() {
     sessionStorage.setItem('rpt-partners', JSON.stringify(q));
     const r = await api(`/api/reports/partners?kind=${q.kind}&from=${q.from}&to=${q.to}`);
     const X = r.kind === 'KH';
-    $('#rp-out').innerHTML = `<p class="muted">Kỳ ${monthLabel(r.from)} → ${monthLabel(r.to)}. ${X ? 'Giá vốn tính theo bình quân gia quyền cuối kỳ với dữ liệu hiện tại.' : ''} Bấm vào tên để xem chi tiết.</p>
-      <div class="table-wrap sticky-head"><table><thead><tr><th>Mã</th><th>${X ? 'Khách hàng' : 'Nhà cung cấp'}</th><th class="num">Số phiếu</th>
-        <th class="num">${X ? 'Doanh thu' : 'Giá trị nhập'}</th>${X ? '<th class="num">Giá vốn</th><th class="num">Lãi gộp</th><th class="num">Tỷ suất LG</th>' : '<th class="num">Tỷ trọng</th>'}</tr></thead><tbody>
-      ${r.rows.map((x) => `<tr><td>${esc(x.code)}</td><td><a href="#" data-pkey="${esc(x.key)}">${esc(x.name)}</a></td><td class="num">${x.voucher_count}</td><td class="num">${fmtM(x.amount)}</td>
-        ${X ? `<td class="num">${fmtM(x.cost)}</td><td class="num">${fmtM(x.profit)}</td><td class="num">${x.amount ? fmtN(x.profit / x.amount * 100, 1) + '%' : ''}</td>`
-        : `<td class="num">${r.total.amount ? fmtN(x.amount / r.total.amount * 100, 1) + '%' : ''}</td>`}</tr>`).join('')
+    $('#rp-out').innerHTML = `<p class="muted small">Kỳ ${monthLabel(r.from)} → ${monthLabel(r.to)}. ${X ? 'Giá vốn tính theo bình quân gia quyền cuối kỳ với dữ liệu hiện tại.' : ''} Bấm vào tên để xem chi tiết · gõ vào ô <b>Lọc</b> dưới tiêu đề để tìm kiếm, lọc từng cột.</p>
+      <div class="table-wrap sticky-head report"><table><thead><tr><th>Mã</th><th>${X ? 'Khách hàng' : 'Nhà cung cấp'}</th><th class="num">Số phiếu</th>
+        <th class="num v">${X ? 'Doanh thu' : 'Giá trị nhập'}</th>${X ? '<th class="num v">Giá vốn</th><th class="num v">Lãi gộp</th><th class="num v">Tỷ suất LG</th>' : '<th class="num v">Tỷ trọng</th>'}</tr></thead><tbody>
+      ${r.rows.map((x) => `<tr><td>${esc(x.code)}</td><td><a href="#" data-pkey="${esc(x.key)}">${esc(x.name)}</a></td><td class="num" ${nv(x.voucher_count)}>${x.voucher_count}</td><td class="num v" ${nv(x.amount)}>${fmtM(x.amount)}</td>
+        ${X ? `<td class="num v" ${nv(x.cost)}>${fmtM(x.cost)}</td><td class="num v" ${nv(x.profit)}>${fmtM(x.profit)}</td><td class="num v" ${nv(x.amount ? x.profit / x.amount * 100 : 0)}>${x.amount ? fmtN(x.profit / x.amount * 100, 1) + '%' : ''}</td>`
+        : `<td class="num v" ${nv(r.total.amount ? x.amount / r.total.amount * 100 : 0)}>${r.total.amount ? fmtN(x.amount / r.total.amount * 100, 1) + '%' : ''}</td>`}</tr>`).join('')
         || `<tr><td colspan="7" class="muted">Không có phát sinh trong kỳ</td></tr>`}</tbody>
-      <tfoot><tr><td colspan="2">Tổng cộng (${r.rows.length} đối tượng)</td><td class="num">${r.total.voucher_count}</td><td class="num">${fmtM(r.total.amount)}</td>
-        ${X ? `<td class="num">${fmtM(r.total.cost)}</td><td class="num">${fmtM(r.total.profit)}</td><td class="num">${r.total.amount ? fmtN(r.total.profit / r.total.amount * 100, 1) + '%' : ''}</td>` : '<td class="num">100%</td>'}</tr></tfoot></table></div>`;
+      <tfoot><tr><td colspan="2">Tổng cộng (<span data-count></span> đối tượng)</td><td class="num" data-sum="2" data-fmt="q"></td><td class="num v" data-sum="3"></td>
+        ${X ? '<td class="num v" data-sum="4"></td><td class="num v" data-sum="5"></td><td class="v"></td>' : '<td class="v"></td>'}</tr></tfoot></table></div>`;
+    if (r.rows.length) tableTools($('#rp-out table'));
   };
   $('#main').addEventListener('click', (e) => {
     const k = e.target.closest('[data-kind]'); if (k) { setKind(k.dataset.kind); load().catch((err) => toast(err.message, true)); }

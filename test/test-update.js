@@ -71,10 +71,10 @@ const upload = (file) => { const fd = new FormData(); fd.append('file', new Blob
     const bad = path.join(tmp, 'hong.khoupd'); fs.writeFileSync(bad, 'khong phai goi cap nhat');
     let r = await upload(bad); assert.equal(r.status, 400); assert.match(r.d.error, /không phải gói cập nhật/);
     // Người dùng không phải quản trị không được cập nhật
-    await ok('/api/users', { method: 'POST', body: { username: 'ketoan', password: 'KeToan2026', role: 'accountant' } });
+    await ok('/api/users', { method: 'POST', body: { username: 'ketoan', password: 'Acc2026kt', role: 'accountant' } });
     const adminCookie = cookie; cookie = '';
-    await ok('/api/login', { method: 'POST', body: { username: 'ketoan', password: 'KeToan2026' } });
-    await ok('/api/me/password', { method: 'POST', body: { old_password: 'KeToan2026', new_password: 'KeToan2027' } });
+    await ok('/api/login', { method: 'POST', body: { username: 'ketoan', password: 'Acc2026kt' } });
+    await ok('/api/me/password', { method: 'POST', body: { old_password: 'Acc2026kt', new_password: 'Acc2027kt' } });
     r = await upload(p990); assert.equal(r.status, 403);
     cookie = adminCookie;
     step('Từ chối file không phải gói cập nhật; chỉ Quản trị được cập nhật');

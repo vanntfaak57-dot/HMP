@@ -195,18 +195,18 @@ const step = (s) => console.log('✔', s);
     assert.equal(x.status, 200); assert.ok((await x.arrayBuffer()).byteLength > 1000); step('Xuất Excel NXT');
 
     // Phân quyền: chỉ Quản trị thêm người dùng; Thủ kho chỉ xem số lượng
-    await ok('/api/users', { method: 'POST', body: { username: 'thukho', password: 'ThuKho2026', full_name: 'Thủ kho', role: 'storekeeper' } });
-    await ok('/api/users', { method: 'POST', body: { username: 'ketoan', password: 'KeToan2026', full_name: 'Kế toán', role: 'accountant' } });
+    await ok('/api/users', { method: 'POST', body: { username: 'thukho', password: 'Wh2026store', full_name: 'Thủ kho', role: 'storekeeper' } });
+    await ok('/api/users', { method: 'POST', body: { username: 'ketoan', password: 'Acc2026kt', full_name: 'Kế toán', role: 'accountant' } });
     const adminCookie = cookie;
     const loginAs = async (u, pw, newPw) => {
       cookie = '';
       await ok('/api/login', { method: 'POST', body: { username: u, password: pw } });
       await ok('/api/me/password', { method: 'POST', body: { old_password: pw, new_password: newPw } });
     };
-    await loginAs('ketoan', 'KeToan2026', 'KeToan2027');
+    await loginAs('ketoan', 'Acc2026kt', 'Acc2027kt');
     assert.equal((await api('/api/users', { method: 'POST', body: { username: 'x1', password: 'Abcdef123', role: 'viewer' } })).status, 403);
     assert.ok((await ok('/api/items'))[0].opening_value !== undefined); // kế toán xem đủ giá trị
-    await loginAs('thukho', 'ThuKho2026', 'ThuKho2027');
+    await loginAs('thukho', 'Wh2026store', 'Wh2027store');
     const MONEY = /"(opening_value|sale_price|sale_price_vat|total_amount|total_cost|total_vat|unit_price|price_vat|amount|cost_price|cost_amount|vat_amount|open_val|in_val|out_val|close_val|avg|price|value|bal_val|amt)"/;
     const tkItems = await ok('/api/items');
     assert.ok(tkItems[0].stock_qty !== undefined && tkItems[0].opening_qty !== undefined);

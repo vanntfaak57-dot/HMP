@@ -21,7 +21,7 @@
     'total_amount', 'total_cost', 'total_vat',
     'unit_price', 'price_vat', 'amount', 'discount_rate', 'vat_amount', 'cost_price', 'cost_amount',
     'open_val', 'in_val', 'out_val', 'close_val', 'avg', 'price', 'value', 'bal_val', 'amt',
-    'stock_other', 'revenue', 'cost', 'profit', 'purchase', 'margin',
+    'avg_price', 'stock_other', 'revenue', 'cost', 'profit', 'purchase', 'margin',
   ]);
   // Đường dẫn chỉ phục vụ số liệu giá trị: thủ kho không được truy cập
   const VALUE_ONLY_PATHS = [/^\/api\/reports\/(partners|partner-detail|analytics)$/, /^\/api\/last-prices$/, /^\/api\/attachments\//, /^\/api\/pdf\//, /^\/api\/costing\//];

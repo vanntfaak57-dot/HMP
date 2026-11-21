@@ -20,9 +20,14 @@ function verifyPassword(pw, stored) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-function validatePassword(pw) {
+// Mật khẩu quá phổ biến, dễ bị đoán
+const WEAK = new Set(['admin@123', 'admin123', 'password1', 'abc12345', '12345678a', 'a12345678', 'qwerty123', '123456789a', 'matkhau123', 'matkhau1', 'admin1234', 'abcd1234', '1234abcd', 'iloveyou1', 'ketoan123', 'thukho123', 'khohang123']);
+function validatePassword(pw, username = '') {
   if (!pw || pw.length < 8) return 'Mật khẩu phải có ít nhất 8 ký tự';
+  if (pw.length > 128) return 'Mật khẩu quá dài';
   if (!/[A-Za-z]/.test(pw) || !/[0-9]/.test(pw)) return 'Mật khẩu phải gồm cả chữ và số';
+  if (WEAK.has(pw.toLowerCase())) return 'Mật khẩu này quá phổ biến, dễ bị đoán. Hãy chọn mật khẩu khác';
+  if (username && pw.toLowerCase().includes(String(username).toLowerCase())) return 'Mật khẩu không được chứa tên đăng nhập';
   return null;
 }
 
@@ -42,11 +47,11 @@ function clientInfo(req) {
   return { ip, ua: String(req.headers['user-agent'] || '').slice(0, 300) };
 }
 
-function audit(req, action, detail = '', user = null) {
+function audit(req, action, detail = '', user = null, ref = null) {
   const u = user || req.user || {};
   const { ip, ua } = clientInfo(req);
-  db.prepare('INSERT INTO audit_log(ts, user_id, username, action, detail, ip, ua) VALUES (?,?,?,?,?,?,?)')
-    .run(now(), u.id ?? null, u.username ?? null, action, typeof detail === 'string' ? detail : JSON.stringify(detail), ip, ua);
+  db.prepare('INSERT INTO audit_log(ts, user_id, username, action, detail, ip, ua, ref) VALUES (?,?,?,?,?,?,?,?)')
+    .run(now(), u.id ?? null, u.username ?? null, action, typeof detail === 'string' ? detail : JSON.stringify(detail), ip, ua, ref);
 }
 
 function parseCookies(req) {
@@ -70,31 +75,67 @@ function setCookie(req, res, token, maxAgeSec) {
   res.setHeader('Set-Cookie', `sid=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAgeSec}${secure}`);
 }
 
+// Giới hạn số lần đăng nhập sai theo địa chỉ IP (chống dò mật khẩu nhiều tài khoản)
+const IP_MAX_FAILS = 20;
+const IP_WINDOW_MS = 15 * 60 * 1000;
+const ipFails = new Map();
+function ipBlocked(ip) {
+  const e = ipFails.get(ip);
+  if (!e) return false;
+  if (Date.now() - e.first > IP_WINDOW_MS) { ipFails.delete(ip); return false; }
+  return e.count >= IP_MAX_FAILS;
+}
+function ipFail(ip) {
+  const e = ipFails.get(ip);
+  if (!e || Date.now() - e.first > IP_WINDOW_MS) ipFails.set(ip, { first: Date.now(), count: 1 });
+  else e.count++;
+  if (ipFails.size > 10000) ipFails.clear();
+}
+const DUMMY_HASH = hashPassword('khong-co-tai-khoan-nay-' + crypto.randomBytes(8).toString('hex'));
+const GENERIC = 'Sai tên đăng nhập hoặc mật khẩu';
+
 function login(req, res) {
   const { username, password } = req.body || {};
-  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(String(username || '').trim());
+  const { ip } = clientInfo(req);
+  if (ipBlocked(ip)) {
+    audit(req, 'LOGIN_FAIL', `Chặn tạm thời IP ${ip} do đăng nhập sai quá ${IP_MAX_FAILS} lần`);
+    return res.status(429).json({ error: 'Đăng nhập sai quá nhiều lần từ địa chỉ này. Vui lòng thử lại sau 15 phút' });
+  }
+  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(String(username || '').trim().slice(0, 64));
   if (!user) {
+    verifyPassword(String(password || ''), DUMMY_HASH); // cùng thời gian xử lý như tài khoản có thật (không dò được tên đăng nhập)
+    ipFail(ip);
     audit(req, 'LOGIN_FAIL', `Tên đăng nhập không tồn tại: ${String(username || '').slice(0, 50)}`);
-    return res.status(401).json({ error: 'Sai tên đăng nhập hoặc mật khẩu' });
+    return res.status(401).json({ error: GENERIC });
   }
   if (!user.active) {
+    verifyPassword(String(password || ''), DUMMY_HASH);
+    ipFail(ip);
     audit(req, 'LOGIN_FAIL', 'Tài khoản đã bị khóa', user);
-    return res.status(403).json({ error: 'Tài khoản đã bị vô hiệu hóa' });
+    return res.status(401).json({ error: GENERIC });
   }
   if (user.locked_until && user.locked_until > now()) {
     audit(req, 'LOGIN_FAIL', 'Đang bị tạm khóa do nhập sai nhiều lần', user);
-    return res.status(429).json({ error: `Tài khoản tạm khóa đến ${user.locked_until} do nhập sai mật khẩu nhiều lần` });
+    return res.status(429).json({ error: `Tài khoản tạm khóa ${LOCK_MINUTES} phút do nhập sai mật khẩu nhiều lần` });
+  }
+  // Tài khoản còn mật khẩu ban đầu (bắt buộc đổi): chỉ cho đăng nhập trên máy chủ / mạng nội bộ, không cho từ Internet
+  if (user.must_change && viaProxy(req) && process.env.KHO_DOCKER !== '1') {
+    audit(req, 'LOGIN_FAIL', 'Chặn đăng nhập từ Internet khi tài khoản còn mật khẩu ban đầu', user);
+    return res.status(403).json({ error: 'Tài khoản đang dùng mật khẩu ban đầu: hãy đăng nhập và đổi mật khẩu trên máy cài phần mềm (hoặc trong mạng nội bộ) trước khi dùng qua Internet' });
   }
   if (!verifyPassword(String(password || ''), user.password_hash)) {
+    ipFail(ip);
     const failed = user.failed_count + 1;
     const lockedUntil = failed >= MAX_FAILED ? addHours(LOCK_MINUTES / 60) : null;
     db.prepare('UPDATE users SET failed_count = ?, locked_until = ? WHERE id = ?').run(lockedUntil ? 0 : failed, lockedUntil, user.id);
     audit(req, 'LOGIN_FAIL', lockedUntil ? `Sai mật khẩu lần ${failed} - tạm khóa ${LOCK_MINUTES} phút` : `Sai mật khẩu lần ${failed}`, user);
-    return res.status(401).json({ error: 'Sai tên đăng nhập hoặc mật khẩu' });
+    return res.status(401).json({ error: GENERIC });
   }
   db.prepare('UPDATE users SET failed_count = 0, locked_until = NULL WHERE id = ?').run(user.id);
+  // dọn phiên hết hạn
+  db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(now());
   const token = crypto.randomBytes(32).toString('hex');
-  const { ip, ua } = clientInfo(req);
+  const { ua } = clientInfo(req);
   db.prepare('INSERT INTO sessions(token, user_id, created_at, expires_at, last_seen, ip, ua) VALUES (?,?,?,?,?,?,?)')
     .run(token, user.id, now(), addHours(SESSION_HOURS), now(), ip, ua);
   setCookie(req, res, token, SESSION_HOURS * 3600);
