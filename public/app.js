@@ -14,7 +14,7 @@ const ACTIONS = {
   ITEM_CREATE: 'Thêm mã hàng', ITEM_UPDATE: 'Sửa mã hàng', ITEM_DELETE: 'Xóa mã hàng', ITEM_BULK_DELETE: 'Xóa hàng loạt mã hàng', ITEM_IMPORT: 'Nhập Excel danh mục',
   VOUCHER_CREATE: 'Thêm chứng từ', VOUCHER_UPDATE: 'Sửa chứng từ', VOUCHER_DELETE: 'Xóa chứng từ', VOUCHER_POST: 'Ghi sổ chứng từ', VOUCHER_UNPOST: 'Bỏ ghi chứng từ', PDF_UPLOAD: 'Tải PDF',
   COSTING_RUN: 'Tính giá xuất kho', PERIOD_LOCK: 'Khóa sổ', PERIOD_UNLOCK: 'Mở khóa sổ', USER_CREATE: 'Thêm người dùng',
-  USER_UPDATE: 'Sửa người dùng', PARTNER_CREATE: 'Thêm KH/NCC', PARTNER_UPDATE: 'Sửa KH/NCC', PARTNER_DELETE: 'Xóa KH/NCC', PARTNER_IMPORT: 'Nhập Excel KH/NCC', SETTINGS_UPDATE: 'Sửa cài đặt', EXPORT: 'Xuất báo cáo', BACKUP: 'Sao lưu dữ liệu', UPDATE: 'Cập nhật phần mềm',
+  USER_UPDATE: 'Sửa người dùng', PARTNER_CREATE: 'Thêm KH/NCC', PARTNER_UPDATE: 'Sửa KH/NCC', PARTNER_DELETE: 'Xóa KH/NCC', PARTNER_IMPORT: 'Nhập Excel KH/NCC', SETTINGS_UPDATE: 'Sửa cài đặt', EXPORT: 'Xuất báo cáo', BACKUP: 'Sao lưu dữ liệu', RESTORE: 'Khôi phục dữ liệu', UPDATE: 'Cập nhật phần mềm',
 };
 
 const VAT_OPTIONS = [['', '-- Chưa chọn --'], ['0', '0%'], ['5', '5%'], ['8', '8%'], ['10', '10%'], ['KCT', 'KCT – Không chịu thuế'], ['KKKNT', 'KKKNT – Không kê khai, tính nộp thuế']];
@@ -1088,19 +1088,40 @@ async function pageSettings() {
     <p class="muted wide" style="margin:0" id="num-preview"></p>
     </form><p class="muted">Số dư tồn kho nhập trong danh mục vật tư là số dư cuối ngày A. Mọi chứng từ phải có ngày sau ngày A. Không đổi được ngày A khi đã có chứng từ trước ngày đó hoặc đã khóa sổ.</p>
     <button class="btn primary" id="s-save">Lưu cài đặt</button></div>
+    <div class="card" id="tunnel-card" hidden></div>
     <div class="card" id="lan-card" hidden></div>
     <div class="card" id="shutdown-card" hidden><h2 style="margin-top:0">Tắt phần mềm</h2>
       <p class="muted">Phần mềm chạy ngầm trên máy này (không có cửa sổ riêng). Tắt phần mềm thì mọi máy đều không truy cập được cho đến khi mở lại KhoETC.exe.</p>
       <button class="btn danger" id="shutdown-btn">Tắt phần mềm</button></div>
     <div class="card" id="backup-card"><h2 style="margin-top:0">Sao lưu dữ liệu</h2>
       <p class="muted">Tải về toàn bộ dữ liệu (danh mục, chứng từ, người dùng, nhật ký) thành 1 file .db. Nên tải định kỳ và cất ở nơi an toàn. File PDF đính kèm không nằm trong bản sao lưu này.</p>
-      <a class="btn" href="/api/backup">Tải bản sao lưu dữ liệu</a></div>`;
+      <a class="btn" href="/api/backup">Tải bản sao lưu dữ liệu</a>
+      <h3 style="margin:18px 0 6px">Khôi phục dữ liệu</h3>
+      <p class="muted small">Thay <b>toàn bộ</b> dữ liệu hiện tại bằng một bản sao lưu (.db), ví dụ khi chuyển sang máy mới hoặc máy hỏng phải cài lại.
+        Dữ liệu hiện tại được tự cất vào thư mục data/backups trước khi thay. Tài khoản và mật khẩu cũng trở về như trong bản sao lưu.</p>
+      <label class="btn danger" id="restore-label">Chọn file sao lưu để khôi phục<input type="file" id="restore-file" accept=".db" hidden></label>
+      <div id="restore-msg"></div></div>`;
   const preview = () => {
     const d = Number($('[name=number_digits]').value) || 5;
     $('#num-preview').textContent = `Ví dụ: phiếu nhập ${$('[name=number_prefix_N]').value}${'1'.padStart(d, '0')}, phiếu xuất ${$('[name=number_prefix_X]').value}${'1'.padStart(d, '0')}. Số tiếp theo = số lớn nhất đang có cùng ký hiệu + 1.`;
   };
   $$('#s-form [name^=number_]').forEach((i) => i.addEventListener('input', preview)); preview();
   renderLanCard().catch(() => { /* bản demo không có chức năng này */ });
+  renderTunnelCard().catch(() => { /* bản demo không có chức năng này */ });
+  $('#restore-file')?.addEventListener('change', async (e) => {
+    const f = e.target.files[0]; e.target.value = '';
+    if (!f) return;
+    if (!confirm(`Khôi phục toàn bộ dữ liệu từ file ${f.name}?\n\nDữ liệu hiện tại sẽ được thay thế (bản hiện tại tự cất vào data/backups). Mọi người đang dùng sẽ phải đăng nhập lại.`)) return;
+    const fd = new FormData(); fd.append('confirm', 'KHOI PHUC'); fd.append('file', f);
+    $('#restore-msg').innerHTML = '<div class="alert info">Đang kiểm tra và khôi phục…</div>';
+    try {
+      const r = await api('/api/restore', { method: 'POST', body: fd });
+      $('#restore-msg').innerHTML = `<div class="alert info">Đã nhận bản sao lưu (${r.items} mã hàng, ${r.vouchers} chứng từ, ${r.users} người dùng). <b>Đang khởi động lại phần mềm…</b></div>`;
+      await new Promise((x) => setTimeout(x, 2000));
+      for (let i = 0; i < 60; i++) { try { if ((await fetch('/healthz')).ok) break; } catch { /* đang khởi động */ } await new Promise((x) => setTimeout(x, 1000)); }
+      location.href = '/';
+    } catch (err) { $('#restore-msg').innerHTML = ''; toast(err.message, true); }
+  });
   api('/api/version').then((v) => {
     if (v.mode === 'docker') return;
     $('#shutdown-card').hidden = false;
@@ -1116,6 +1137,52 @@ async function pageSettings() {
     body.number_digits = Number(body.number_digits);
     try { await api('/api/settings', { method: 'PUT', body }); toast('Đã lưu'); await boot(); } catch (err) { toast(err.message, true); }
   });
+}
+
+// ---------- Truy cập từ Internet (Cloudflare Tunnel) ----------
+let tunnelTimer = null;
+async function renderTunnelCard() {
+  const t = await api('/api/tunnel');
+  const card = $('#tunnel-card');
+  if (!card || !t.available) return;
+  card.hidden = false;
+  const status = t.downloading ? '<span class="badge warn">Đang tải cloudflared…</span>'
+    : t.connected ? '<span class="badge ok">Đã kết nối</span>'
+    : t.enabled && t.running ? '<span class="badge warn">Đang kết nối…</span>'
+    : t.enabled ? `<span class="badge danger">Chưa kết nối</span>` : '<span class="badge">Đang tắt</span>';
+  card.innerHTML = `<h2 style="margin-top:0">Truy cập từ Internet (Cloudflare Tunnel)</h2>
+    <p>Trạng thái: ${status} ${t.connected && t.url ? `Mọi người truy cập tại <a href="${esc(t.url)}" target="_blank" rel="noopener"><b>${esc(t.url)}</b></a>` : ''}</p>
+    ${t.error ? `<div class="alert">${esc(t.error)}</div>` : ''}
+    <details ${t.has_token ? '' : 'open'}><summary><b>Cách lấy token trên trang Cloudflare</b> (làm một lần)</summary>
+      <ol class="steps">
+        <li>Đăng nhập <b>dash.cloudflare.com</b> → <b>Zero Trust</b> → <b>Networks</b> → <b>Tunnels</b> → <b>Create a tunnel</b> → chọn <b>Cloudflared</b>.</li>
+        <li>Đặt tên đường hầm (ví dụ <code>kho</code>) → <b>Save tunnel</b>.</li>
+        <li>Ở bước cài đặt, chọn Windows, rồi <b>chép lệnh</b> trong ô (dạng <code>cloudflared.exe service install eyJ…</code>) và dán vào ô Token bên dưới. Không cần chạy lệnh đó. → <b>Next</b>.</li>
+        <li>Mục <b>Public Hostname</b>: Subdomain <code>kho</code>, Domain chọn tên miền của bạn, <b>Service Type</b> = <code>HTTP</code>, <b>URL</b> = <code>${esc(t.local_service.replace('http://', ''))}</code> → <b>Save</b>.</li>
+      </ol></details>
+    <div class="form-grid" style="margin-top:10px">
+      <label>Token đường hầm${t.has_token ? ` (đã lưu ${esc(t.token_hint)})` : ''}<input type="password" id="tn-token" placeholder="${t.has_token ? 'Để trống nếu không đổi' : 'Dán lệnh hoặc token từ Cloudflare'}" autocomplete="off"></label>
+      <label>Địa chỉ truy cập (Public Hostname)<input id="tn-url" value="${esc(t.url)}" placeholder="https://kho.tencongty.vn"></label>
+    </div>
+    <div class="toolbar" style="margin-top:10px">
+      <button class="btn primary" id="tn-save">${t.enabled ? 'Lưu' : 'Lưu và bật truy cập từ Internet'}</button>
+      ${t.enabled ? '<button class="btn" id="tn-off">Tắt truy cập từ Internet</button>' : ''}
+    </div>
+    <p class="muted small">Phần mềm tự tải công cụ <b>cloudflared</b> chính thức của Cloudflare và tự chạy đường hầm mỗi khi mở phần mềm. Máy này phải luôn bật.
+      Đặt mật khẩu mạnh cho mọi tài khoản và tải bản sao lưu định kỳ.</p>
+    ${t.log.length ? `<details><summary class="muted small">Nhật ký đường hầm</summary><pre class="tn-log">${esc(t.log.join('\n'))}</pre></details>` : ''}`;
+  $('#tn-save').addEventListener('click', async () => {
+    const body = { url: $('#tn-url').value, enabled: true };
+    if ($('#tn-token').value.trim()) body.token = $('#tn-token').value;
+    try { await api('/api/tunnel', { method: 'PUT', body }); toast('Đã lưu, đang kết nối đường hầm…'); renderTunnelCard(); } catch (err) { toast(err.message, true); }
+  });
+  $('#tn-off')?.addEventListener('click', async () => {
+    if (!confirm('Tắt truy cập từ Internet? Người dùng ngoài mạng nhà sẽ không vào được nữa.')) return;
+    try { await api('/api/tunnel', { method: 'PUT', body: { enabled: false } }); toast('Đã tắt truy cập từ Internet'); renderTunnelCard(); } catch (err) { toast(err.message, true); }
+  });
+  // tự cập nhật trạng thái khi đang kết nối
+  clearTimeout(tunnelTimer);
+  if (t.enabled && !t.connected) tunnelTimer = setTimeout(() => { if (document.getElementById('tunnel-card')) renderTunnelCard().catch(() => {}); }, 3000);
 }
 
 // ---------- Dùng chung trong mạng nội bộ ----------

@@ -37,6 +37,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit 1 }
           node test/test-lan.js
           if ($LASTEXITCODE -ne 0) { exit 1 }
+          node test/test-online.js
+          if ($LASTEXITCODE -ne 0) { exit 1 }
           # KhoETC.exe phải là ứng dụng Windows chạy ngầm (PE subsystem = 2), không mở cửa sổ đen
           $b = [IO.File]::ReadAllBytes($env:APP_BIN); $pe = [BitConverter]::ToInt32($b, 0x3c)
           $sub = [BitConverter]::ToUInt16($b, $pe + 24 + 68); Write-Output "PE subsystem: $sub"
@@ -64,7 +66,9 @@ jobs:
       - name: Dựng bản Linux và gói cập nhật
         run: node tools/build-app.js update linux
       - name: Kiểm thử bản Linux đã đóng gói
-        run: APP_BIN=build/dist/KhoETC-Linux-x64/KhoETC node test/test.js
+        run: |
+          APP_BIN=build/dist/KhoETC-Linux-x64/KhoETC node test/test.js
+          APP_BIN=build/dist/KhoETC-Linux-x64/KhoETC node test/test-online.js
       - uses: actions/upload-artifact@v4
         with:
           name: linux

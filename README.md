@@ -67,6 +67,15 @@ Máy cài phần mềm là máy chủ; máy tính / điện thoại khác cùng 
 Bật: Quản trị vào **Cài đặt → Dùng chung trong mạng nội bộ → Bật** (phần mềm tự khởi động lại và hiện đường link + mã QR, ví dụ `http://192.168.1.10:3000`).
 Cấu hình lưu trong `kho-config.json` cạnh file chạy (`"host": "0.0.0.0"`). App Windows kèm `MO-TUONG-LUA.bat` (mở tường lửa) và `TU-DONG-CHAY-KHI-BAT-MAY.bat`.
 
+## Truy cập từ Internet bằng tên miền riêng (Cloudflare Tunnel)
+
+Máy chạy KhoETC ở nhà / văn phòng phục vụ luôn người dùng ở bất cứ đâu qua `https://kho.tencongty.vn`, không cần mở cổng modem hay IP tĩnh:
+1. Tên miền đã thêm vào Cloudflare. Trên dash.cloudflare.com → Zero Trust → Networks → Tunnels → Create a tunnel (Cloudflared), đặt tên, chép lệnh cài (chứa token `eyJ…`).
+2. Public Hostname: subdomain `kho`, Service `HTTP` → `localhost:3000`.
+3. Trong phần mềm: Cài đặt → Truy cập từ Internet → dán lệnh/token, nhập địa chỉ → Lưu và bật. Phần mềm tự tải `cloudflared`, tự chạy đường hầm mỗi khi mở.
+
+Truy cập qua Cloudflare: cookie đăng nhập có cờ `Secure`, nhật ký ghi IP thật (`CF-Connecting-IP`).
+
 ## Đóng gói thành app riêng (không cần cài Node.js)
 
 ```bash
@@ -93,4 +102,5 @@ Phát hành phiên bản mới:
 npm test                 # nghiệp vụ
 node test/test-update.js # cập nhật phần mềm
 node test/test-lan.js    # dùng chung trong mạng nội bộ
+node test/test-online.js # Cloudflare Tunnel, proxy, khôi phục dữ liệu
 ```

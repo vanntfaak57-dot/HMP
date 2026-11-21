@@ -1,5 +1,10 @@
 # Lịch sử phiên bản
 
+## 1.3.0
+- Truy cập từ Internet bằng tên miền riêng qua Cloudflare Tunnel: Cài đặt → Truy cập từ Internet, dán token đường hầm từ Cloudflare. Phần mềm tự tải cloudflared, tự chạy đường hầm mỗi khi mở, hiện trạng thái kết nối.
+- Nhận biết truy cập qua Cloudflare: cookie đăng nhập chỉ gửi qua HTTPS, nhật ký ghi IP thật của người dùng.
+- Khôi phục dữ liệu từ bản sao lưu (Cài đặt → Sao lưu dữ liệu → Khôi phục), tự cất dữ liệu cũ trước khi thay.
+
 ## 1.2.0
 - Dùng chung trong mạng nội bộ: Cài đặt → Dùng chung trong mạng nội bộ → Bật. Máy tính, điện thoại khác cùng mạng mở đường link (có mã QR) để dùng, đăng nhập bằng tài khoản riêng, dữ liệu dùng chung.
 - App Windows chạy ngầm, không còn cửa sổ đen; thêm nút Cài đặt → Tắt phần mềm. Nhật ký kỹ thuật ghi vào data/logs/kho.log.

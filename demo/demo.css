@@ -225,3 +225,6 @@ input[readonly] { background: var(--panel-2, #eef2f6); }
 .lan-link { display: flex; gap: 14px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line, #dde3ea); flex-wrap: wrap; }
 .lan-qr svg { width: 110px; height: 110px; display: block; background: #fff; border-radius: 4px; }
 .lan-url { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 16px; }
+.steps { margin: 8px 0 4px 18px; padding: 0; line-height: 1.7; }
+.steps code, .lan-url code { background: var(--panel-2, #eef2f6); padding: 0 4px; border-radius: 3px; }
+.tn-log { max-height: 220px; overflow: auto; font-size: 11px; background: var(--panel-2, #eef2f6); padding: 8px; border-radius: 4px; white-space: pre-wrap; }

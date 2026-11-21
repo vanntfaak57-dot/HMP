@@ -7,7 +7,23 @@ const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
-const db = new DatabaseSync(path.join(DATA_DIR, 'kho.db'));
+// Khôi phục dữ liệu: file restore-pending.db (do chức năng Khôi phục tạo) thay cho CSDL hiện tại khi khởi động;
+// CSDL cũ được cất vào data/backups trước khi thay.
+const DB_FILE = path.join(DATA_DIR, 'kho.db');
+const RESTORE_PENDING = path.join(DATA_DIR, 'restore-pending.db');
+let restoredFrom = null;
+if (fs.existsSync(RESTORE_PENDING)) {
+  const bdir = path.join(DATA_DIR, 'backups');
+  fs.mkdirSync(bdir, { recursive: true });
+  const d = new Date(); const p2 = (n) => String(n).padStart(2, '0');
+  const stamp = `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
+  const old = path.join(bdir, `truoc-khoi-phuc-${stamp}.db`);
+  for (const ext of ['', '-wal', '-shm']) if (fs.existsSync(DB_FILE + ext)) fs.renameSync(DB_FILE + ext, old + ext);
+  fs.renameSync(RESTORE_PENDING, DB_FILE);
+  restoredFrom = path.basename(old);
+  console.log(`>> Đã khôi phục dữ liệu từ bản sao lưu. Dữ liệu trước khi khôi phục cất tại backups/${restoredFrom}`);
+}
+const db = new DatabaseSync(DB_FILE);
 
 db.exec(`
 PRAGMA journal_mode = WAL;
@@ -208,4 +224,9 @@ db.exec("UPDATE users SET role = 'accountant' WHERE role = 'user'");
 // Tên đơn vị mặc định (đổi được trong Cài đặt)
 if (!getSetting('company_name')) setSetting('company_name', 'Kho hàng ETC MDA');
 
-module.exports = { db, tx, now, getSetting, setSetting, DATA_DIR, UPLOAD_DIR };
+if (restoredFrom) {
+  db.prepare('INSERT INTO audit_log(ts, username, action, detail, ip, ua) VALUES (?,?,?,?,?,?)')
+    .run(now(), null, 'RESTORE', `Khôi phục dữ liệu từ bản sao lưu; dữ liệu trước khi khôi phục cất tại backups/${restoredFrom}`, 'máy chủ', '');
+}
+
+module.exports = { db, tx, now, getSetting, setSetting, DATA_DIR, UPLOAD_DIR, RESTORE_PENDING };

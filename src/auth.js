@@ -26,9 +26,18 @@ function validatePassword(pw) {
   return null;
 }
 
+// Yêu cầu đến qua proxy tin cậy: TRUST_PROXY=1 (Caddy/Render), hoặc cloudflared chạy trên chính máy này
+// (kết nối từ 127.0.0.1 kèm header của Cloudflare). Máy khác trong mạng nội bộ không giả mạo được IP.
+const isLoopback = (a) => a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1';
+function viaProxy(req) {
+  if (process.env.TRUST_PROXY === '1') return true;
+  return isLoopback(req.socket.remoteAddress || '') && !!(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for']);
+}
+function isHttps(req) {
+  return viaProxy(req) && String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
+}
 function clientInfo(req) {
-  // Chỉ tin X-Forwarded-For khi chạy sau proxy của mình (Caddy/Render): TRUST_PROXY=1
-  const fwd = process.env.TRUST_PROXY === '1' ? (req.headers['x-forwarded-for'] || '').split(',')[0].trim() : '';
+  const fwd = viaProxy(req) ? String(req.headers['cf-connecting-ip'] || (req.headers['x-forwarded-for'] || '').split(',')[0]).trim() : '';
   const ip = fwd || req.socket.remoteAddress || '';
   return { ip, ua: String(req.headers['user-agent'] || '').slice(0, 300) };
 }
@@ -55,8 +64,9 @@ function addHours(h) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-function setCookie(res, token, maxAgeSec) {
-  const secure = process.env.COOKIE_SECURE === '1' ? '; Secure' : '';
+function setCookie(req, res, token, maxAgeSec) {
+  // Cookie chỉ gửi qua HTTPS khi truy cập bằng HTTPS (qua Cloudflare / máy chủ online)
+  const secure = process.env.COOKIE_SECURE === '1' || isHttps(req) ? '; Secure' : '';
   res.setHeader('Set-Cookie', `sid=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAgeSec}${secure}`);
 }
 
@@ -87,7 +97,7 @@ function login(req, res) {
   const { ip, ua } = clientInfo(req);
   db.prepare('INSERT INTO sessions(token, user_id, created_at, expires_at, last_seen, ip, ua) VALUES (?,?,?,?,?,?,?)')
     .run(token, user.id, now(), addHours(SESSION_HOURS), now(), ip, ua);
-  setCookie(res, token, SESSION_HOURS * 3600);
+  setCookie(req, res, token, SESSION_HOURS * 3600);
   audit(req, 'LOGIN_OK', 'Đăng nhập thành công', user);
   res.json({ ok: true, user: publicUser(user) });
 }
@@ -96,7 +106,7 @@ function logout(req, res) {
   const token = parseCookies(req).sid;
   if (token) db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
   if (req.user) audit(req, 'LOGOUT', 'Đăng xuất');
-  setCookie(res, '', 0);
+  setCookie(req, res, '', 0);
   res.json({ ok: true });
 }
 
@@ -144,6 +154,6 @@ function ensureAdmin() {
 }
 
 module.exports = {
-  hashPassword, verifyPassword, validatePassword, audit, login, logout,
+  isHttps, viaProxy, hashPassword, verifyPassword, validatePassword, audit, login, logout,
   requireAuth, requireRole, ensureAdmin, publicUser,
 };

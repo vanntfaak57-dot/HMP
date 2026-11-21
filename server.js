@@ -43,7 +43,8 @@ try { EMBEDDED = require('kho:assets'); } catch { EMBEDDED = null; }
 const crypto = require('crypto');
 const ExcelJS = require('exceljs');
 
-const { db, tx, now, getSetting, setSetting, UPLOAD_DIR } = require('./src/db');
+const { db, tx, now, getSetting, setSetting, UPLOAD_DIR, DATA_DIR, RESTORE_PENDING } = require('./src/db');
+const tunnel = require('./src/tunnel');
 const auth = require('./src/auth');
 const { audit, requireAuth, requireRole } = auth;
 const costing = require('./src/costing');
@@ -68,7 +69,7 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
-  if (process.env.COOKIE_SECURE === '1') res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+  if (process.env.COOKIE_SECURE === '1' || auth.isHttps(req)) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
   next();
 });
 if (EMBEDDED) {
@@ -327,6 +328,74 @@ app.post('/api/shutdown', adminOnly, h((req, res) => {
   res.json({ ok: true });
   console.log('>> Tắt phần mềm theo yêu cầu của ' + req.user.username);
   setTimeout(() => process.exit(0), 300);
+}));
+
+// ---------------- Khôi phục dữ liệu từ bản sao lưu ----------------
+const restoreUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 500 * 1024 * 1024 } });
+app.post('/api/restore', adminOnly, restoreUpload.single('file'), h((req, res) => {
+  if (!req.file) throw fail('Chưa chọn file sao lưu');
+  if (req.body?.confirm !== 'KHOI PHUC') throw fail('Thiếu xác nhận khôi phục');
+  if (req.file.buffer.subarray(0, 16).toString('latin1') !== 'SQLite format 3\0') throw fail('File không phải bản sao lưu dữ liệu (.db) của phần mềm');
+  const tmpFile = path.join(DATA_DIR, `restore-check-${crypto.randomBytes(6).toString('hex')}.db`);
+  fs.writeFileSync(tmpFile, req.file.buffer);
+  let info;
+  try {
+    const { DatabaseSync } = require('node:sqlite');
+    const chk = new DatabaseSync(tmpFile, { readOnly: true });
+    try {
+      if (chk.prepare('PRAGMA integrity_check').get().integrity_check !== 'ok') throw fail('Bản sao lưu bị hỏng (kiểm tra toàn vẹn không đạt)');
+      const tables = new Set(chk.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name));
+      for (const t of ['users', 'items', 'vouchers', 'voucher_lines', 'settings']) if (!tables.has(t)) throw fail('File không phải bản sao lưu của phần mềm Quản lý kho');
+      if (!chk.prepare("SELECT COUNT(*) c FROM users WHERE role = 'admin' AND active = 1").get().c) throw fail('Bản sao lưu không có tài khoản Quản trị nào đang hoạt động');
+      const n = (t) => chk.prepare(`SELECT COUNT(*) c FROM ${t}`).get().c;
+      info = { items: n('items'), vouchers: n('vouchers'), users: n('users') };
+    } finally { chk.close(); }
+    fs.renameSync(tmpFile, RESTORE_PENDING);
+  } catch (e) {
+    fs.rmSync(tmpFile, { force: true });
+    if (e.status) throw e;
+    throw fail('Không đọc được file sao lưu: ' + e.message);
+  }
+  audit(req, 'RESTORE', `Khôi phục từ ${String(req.file.originalname).slice(0, 80)}: ${info.items} mã hàng, ${info.vouchers} chứng từ, ${info.users} người dùng (khởi động lại để áp dụng)`);
+  res.json({ ok: true, ...info, restarting: true });
+  restartApp();
+}));
+
+// ---------------- Truy cập từ Internet (Cloudflare Tunnel) ----------------
+const tunnelAvailable = () => process.env.KHO_DOCKER !== '1';
+function tunnelInfo() {
+  const token = getSetting('tunnel_token', '');
+  return {
+    available: tunnelAvailable(), enabled: getSetting('tunnel_enabled', '0') === '1', url: getSetting('tunnel_url', ''),
+    has_token: !!token, token_hint: token ? '…' + token.slice(-6) : '', local_service: `http://localhost:${PORT}`,
+    running: tunnel.state.running, connected: tunnel.state.connected, downloading: tunnel.state.downloading,
+    error: tunnel.state.error, log: tunnel.state.log.slice(-25),
+  };
+}
+app.get('/api/tunnel', adminOnly, (req, res) => res.json(tunnelInfo()));
+app.put('/api/tunnel', adminOnly, h((req, res) => {
+  if (!tunnelAvailable()) throw fail('Bản online chạy trên máy chủ: không cần đường hầm');
+  const b = req.body || {};
+  if (b.token !== undefined && String(b.token).trim()) {
+    // chấp nhận cả lệnh cài mà Cloudflare hiển thị ("cloudflared.exe service install eyJ..."): lấy phần token
+    const m = String(b.token).trim().match(/(eyJ[A-Za-z0-9_\-=]+\.?[A-Za-z0-9_\-=]*\.?[A-Za-z0-9_\-=]*)\s*$/) || String(b.token).trim().match(/([A-Za-z0-9_\-=]{60,})\s*$/);
+    if (!m) throw fail('Token không đúng: hãy chép đoạn mã dài bắt đầu bằng "eyJ" trên trang Cloudflare');
+    setSetting('tunnel_token', m[1]);
+  }
+  if (b.url !== undefined) {
+    let url = String(b.url).trim().replace(/\/+$/, '');
+    if (url && !/^https?:\/\//i.test(url)) url = 'https://' + url;
+    if (url && !/^https:\/\/[a-z0-9.-]+\.[a-z]{2,}$/i.test(url)) throw fail('Địa chỉ truy cập phải dạng https://kho.tencongty.vn');
+    setSetting('tunnel_url', url);
+  }
+  if (b.enabled !== undefined) {
+    if (b.enabled && !getSetting('tunnel_token', '')) throw fail('Chưa nhập token đường hầm');
+    setSetting('tunnel_enabled', b.enabled ? '1' : '0');
+  }
+  const on = getSetting('tunnel_enabled', '0') === '1';
+  if (on) tunnel.start(DATA_DIR, getSetting('tunnel_token', '')); else tunnel.stop();
+  audit(req, 'SETTINGS_UPDATE', `Truy cập từ Internet: ${on ? 'bật' : 'tắt'}${getSetting('tunnel_url', '') ? ' (' + getSetting('tunnel_url', '') + ')' : ''}`);
+  res.json(tunnelInfo());
 }));
 
 // ---------------- Dùng chung trong mạng nội bộ ----------------
@@ -1113,9 +1182,11 @@ function openBrowser(url) {
 const localUrl = `http://${HOST === '0.0.0.0' ? '127.0.0.1' : HOST}:${PORT}`;
 const server = app.listen(PORT, HOST, (err) => {
   if (err) return; // Express 5 gọi lại cả khi lỗi (cổng bận): xử lý ở server.on('error')
+  if (tunnelAvailable() && getSetting('tunnel_enabled', '0') === '1' && getSetting('tunnel_token', '')) tunnel.start(DATA_DIR, getSetting('tunnel_token', ''));
   console.log(`Ứng dụng Quản lý kho ${APP_VERSION}${process.env.KHO_RUNNING_UPDATE ? ' (bản cập nhật)' : ''} đang chạy: http://${HOST}:${PORT}`);
   if (sea) {
     const lan = HOST === '0.0.0.0' ? lanAddresses() : [];
+    if (getSetting('tunnel_url', '')) console.log(`  Truy cập từ Internet: ${getSetting('tunnel_url', '')}`);
     console.log(`\n  ${getSetting('company_name', 'Quản lý kho')}\n  Mở trình duyệt tại: ${localUrl}\n  Dữ liệu lưu tại:   ${process.env.DATA_DIR}\n`);
     if (lan.length) console.log(`  MÁY KHÁC TRONG MẠNG NỘI BỘ truy cập bằng đường link:\n${lan.map((a) => '    ' + a.url).join('\n')}\n    http://${os.hostname()}:${PORT}\n`);
     else console.log('  Đang ở chế độ chỉ máy này dùng. Bật dùng chung trong mạng: Cài đặt > Dùng chung trong mạng nội bộ.\n');
