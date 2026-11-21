@@ -204,7 +204,7 @@ async function pageItems() {
       <a class="btn" href="/api/items/template.xlsx">Tải file Excel mẫu</a>
       <label class="btn">Nhập từ Excel<input type="file" id="item-import" accept=".xlsx" hidden></label>` : ''}
     </div>
-    <div class="table-wrap"><table><thead><tr>${W ? '<th class="chk-col"><label class="chk"><input type="checkbox" id="items-all" aria-label="Chọn tất cả" title="Chọn tất cả"></label></th>' : ''}<th>Mã hàng</th><th>Tên hàng</th><th>ĐVT</th><th class="num">Thuế suất GTGT</th><th class="num">SL tồn đầu</th><th class="num">Giá trị tồn đầu</th><th class="num">Đơn giá đầu kỳ</th><th class="num">SL tồn hiện tại</th><th></th></tr></thead>
+    <div class="table-wrap sticky-head"><table><thead><tr>${W ? '<th class="chk-col"><label class="chk"><input type="checkbox" id="items-all" aria-label="Chọn tất cả" title="Chọn tất cả"></label></th>' : ''}<th>Mã hàng</th><th>Tên hàng</th><th>ĐVT</th><th class="num">Thuế suất GTGT</th><th class="num">SL tồn đầu</th><th class="num">Giá trị tồn đầu</th><th class="num">Đơn giá đầu kỳ</th><th class="num">SL tồn hiện tại</th><th></th></tr></thead>
     <tbody id="items-body"></tbody><tfoot id="items-foot"></tfoot></table></div>`;
   render();
   $('#items-filter').addEventListener('input', (e) => { filter = e.target.value; render(); });
