@@ -27,7 +27,9 @@ function validatePassword(pw) {
 }
 
 function clientInfo(req) {
-  const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '';
+  // Chỉ tin X-Forwarded-For khi chạy sau proxy của mình (Caddy/Render): TRUST_PROXY=1
+  const fwd = process.env.TRUST_PROXY === '1' ? (req.headers['x-forwarded-for'] || '').split(',')[0].trim() : '';
+  const ip = fwd || req.socket.remoteAddress || '';
   return { ip, ua: String(req.headers['user-agent'] || '').slice(0, 300) };
 }
 

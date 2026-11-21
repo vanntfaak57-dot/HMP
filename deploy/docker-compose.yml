@@ -1,0 +1,28 @@
+# Chạy trên VPS: phần mềm + Caddy (tự cấp chứng chỉ HTTPS miễn phí cho tên miền)
+#   cp .env.example .env   # sửa DOMAIN và ADMIN_PASSWORD
+#   docker compose up -d --build
+services:
+  app:
+    build: ..
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TRUST_PROXY: "1"      # nhận IP thật của người dùng qua Caddy (ghi nhật ký truy cập)
+      COOKIE_SECURE: "1"    # chỉ gửi cookie đăng nhập qua HTTPS
+    volumes:
+      - ./data:/data
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [app]
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file: .env
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+volumes:
+  caddy_data:
+  caddy_config:

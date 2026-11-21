@@ -14,7 +14,7 @@ const ACTIONS = {
   ITEM_CREATE: 'Thêm mã hàng', ITEM_UPDATE: 'Sửa mã hàng', ITEM_DELETE: 'Xóa mã hàng', ITEM_BULK_DELETE: 'Xóa hàng loạt mã hàng', ITEM_IMPORT: 'Nhập Excel danh mục',
   VOUCHER_CREATE: 'Thêm chứng từ', VOUCHER_UPDATE: 'Sửa chứng từ', VOUCHER_DELETE: 'Xóa chứng từ', VOUCHER_POST: 'Ghi sổ chứng từ', VOUCHER_UNPOST: 'Bỏ ghi chứng từ', PDF_UPLOAD: 'Tải PDF',
   COSTING_RUN: 'Tính giá xuất kho', PERIOD_LOCK: 'Khóa sổ', PERIOD_UNLOCK: 'Mở khóa sổ', USER_CREATE: 'Thêm người dùng',
-  USER_UPDATE: 'Sửa người dùng', PARTNER_CREATE: 'Thêm KH/NCC', PARTNER_UPDATE: 'Sửa KH/NCC', PARTNER_DELETE: 'Xóa KH/NCC', PARTNER_IMPORT: 'Nhập Excel KH/NCC', SETTINGS_UPDATE: 'Sửa cài đặt', EXPORT: 'Xuất báo cáo',
+  USER_UPDATE: 'Sửa người dùng', PARTNER_CREATE: 'Thêm KH/NCC', PARTNER_UPDATE: 'Sửa KH/NCC', PARTNER_DELETE: 'Xóa KH/NCC', PARTNER_IMPORT: 'Nhập Excel KH/NCC', SETTINGS_UPDATE: 'Sửa cài đặt', EXPORT: 'Xuất báo cáo', BACKUP: 'Sao lưu dữ liệu',
 };
 
 const VAT_OPTIONS = [['', '-- Chưa chọn --'], ['0', '0%'], ['5', '5%'], ['8', '8%'], ['10', '10%'], ['KCT', 'KCT – Không chịu thuế'], ['KKKNT', 'KKKNT – Không kê khai, tính nộp thuế']];
@@ -1085,7 +1085,10 @@ async function pageSettings() {
     <label>Số chữ số<input name="number_digits" type="number" min="3" max="10" value="${esc(s.number_digits)}"></label>
     <p class="muted wide" style="margin:0" id="num-preview"></p>
     </form><p class="muted">Số dư tồn kho nhập trong danh mục vật tư là số dư cuối ngày A. Mọi chứng từ phải có ngày sau ngày A. Không đổi được ngày A khi đã có chứng từ trước ngày đó hoặc đã khóa sổ.</p>
-    <button class="btn primary" id="s-save">Lưu cài đặt</button></div>`;
+    <button class="btn primary" id="s-save">Lưu cài đặt</button></div>
+    <div class="card" id="backup-card"><h2 style="margin-top:0">Sao lưu dữ liệu</h2>
+      <p class="muted">Tải về toàn bộ dữ liệu (danh mục, chứng từ, người dùng, nhật ký) thành 1 file .db. Nên tải định kỳ và cất ở nơi an toàn. File PDF đính kèm không nằm trong bản sao lưu này.</p>
+      <a class="btn" href="/api/backup">Tải bản sao lưu dữ liệu</a></div>`;
   const preview = () => {
     const d = Number($('[name=number_digits]').value) || 5;
     $('#num-preview').textContent = `Ví dụ: phiếu nhập ${$('[name=number_prefix_N]').value}${'1'.padStart(d, '0')}, phiếu xuất ${$('[name=number_prefix_X]').value}${'1'.padStart(d, '0')}. Số tiếp theo = số lớn nhất đang có cùng ký hiệu + 1.`;

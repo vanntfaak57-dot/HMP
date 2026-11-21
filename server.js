@@ -47,6 +47,7 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
+  if (process.env.COOKIE_SECURE === '1') res.setHeader('Strict-Transport-Security', 'max-age=31536000');
   next();
 });
 if (sea) {
@@ -93,6 +94,7 @@ function normVat(v) {
 }
 
 // ---------------- Đăng nhập ----------------
+app.get('/healthz', (req, res) => res.json({ ok: true }));
 app.post('/api/login', h(auth.login));
 app.use('/api', requireAuth);
 // Thủ kho: chỉ xem số lượng. Chặn các báo cáo giá trị và xóa mọi trường tiền khỏi dữ liệu trả về.
@@ -149,6 +151,17 @@ app.put('/api/settings', adminOnly, h((req, res) => {
   }
   audit(req, 'SETTINGS_UPDATE', JSON.stringify(b));
   res.json({ ok: true });
+}));
+
+// Sao lưu: tải về bản sao nhất quán của CSDL (chỉ Quản trị)
+app.get('/api/backup', adminOnly, h((req, res) => {
+  const p = (n) => String(n).padStart(2, '0');
+  const d = new Date();
+  const name = `kho-sao-luu-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.db`;
+  const tmp = path.join(require('os').tmpdir(), crypto.randomBytes(8).toString('hex') + '.db');
+  db.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
+  audit(req, 'BACKUP', 'Tải bản sao lưu dữ liệu ' + name);
+  res.download(tmp, name, () => fs.rm(tmp, { force: true }, () => {}));
 }));
 
 // ---------------- Danh mục vật tư hàng hóa ----------------

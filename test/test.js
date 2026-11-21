@@ -3,9 +3,9 @@ const { spawn, execFileSync } = require('child_process');
 const fs = require('fs'); const os = require('os'); const path = require('path');
 const assert = require('assert');
 const dir = fs.mkdtempSync(path.join(process.env.TEST_TMP || os.tmpdir(), 'kho-'));
-const PORT = 3998; const B = `http://127.0.0.1:${PORT}`;
+const PORT = 3998; const B = process.env.APP_URL || `http://127.0.0.1:${PORT}`; // APP_URL: kiểm thử máy chủ đang chạy sẵn (vd. container Docker)
 // APP_BIN=<đường dẫn file chạy đã đóng gói> để kiểm thử chính bản app (KhoETC)
-const srv = process.env.APP_BIN
+const srv = process.env.APP_URL ? null : process.env.APP_BIN
   ? spawn(process.env.APP_BIN, [], { env: { ...process.env, PORT, DATA_DIR: dir, NO_BROWSER: '1' }, stdio: 'pipe' })
   : spawn(process.execPath, ['--no-warnings', path.join(__dirname, '..', 'server.js')], { env: { ...process.env, PORT, DATA_DIR: dir }, stdio: 'pipe' });
 let cookie = '';
@@ -21,7 +21,8 @@ const ok = async (url, opts) => { const r = await api(url, opts); if (r.status !
 const step = (s) => console.log('✔', s);
 
 (async () => {
-  await new Promise((res) => srv.stdout.on('data', (b) => String(b).includes('đang chạy') && res()));
+  if (srv) await new Promise((res) => srv.stdout.on('data', (b) => String(b).includes('đang chạy') && res()));
+  else for (let i = 0; i < 60; i++) { try { if ((await fetch(B + '/healthz')).ok) break; } catch { /* chưa sẵn sàng */ } await new Promise((r) => setTimeout(r, 500)); }
   try {
     assert.equal((await api('/api/items')).status, 401); step('Chặn truy cập khi chưa đăng nhập');
     assert.equal((await api('/api/login', { method: 'POST', body: { username: 'admin', password: 'sai' } })).status, 401); step('Từ chối sai mật khẩu');
@@ -227,5 +228,5 @@ const step = (s) => console.log('✔', s);
     step(`Nhật ký truy cập ghi ${au.total} sự kiện`);
     console.log('\nTẤT CẢ KIỂM THỬ ĐỀU ĐẠT');
   } catch (e) { console.error('✘', e); process.exitCode = 1; }
-  finally { srv.kill(); fs.rmSync(dir, { recursive: true, force: true }); }
+  finally { if (srv) srv.kill(); fs.rmSync(dir, { recursive: true, force: true }); }
 })();

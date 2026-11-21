@@ -1,0 +1,9 @@
+node_modules
+data
+build
+demo
+test
+tools
+deploy/data
+.git
+*.zip

@@ -29,6 +29,7 @@ app = rep(app, '<button class="btn" id="r-xlsx">Xuất Excel</button>', '')
 app = rep(app, "$('#r-xlsx').addEventListener", "$('#r-xlsx')?.addEventListener")
 app = rep(app, '<a class="btn" href="/api/items/template.xlsx">Tải file Excel mẫu</a>', '<button class="btn" type="button" onclick="showColumns()">Định dạng file Excel</button>')
 app = rep(app, '<a class="btn" href="/api/partners/template.xlsx?kind=${kind}">Tải file Excel mẫu</a>', '<button class="btn" type="button" onclick="showPartnerColumns(\'${kind}\')">Định dạng file Excel</button>')
+app = rep(app, '<a class="btn" href="/api/backup">Tải bản sao lưu dữ liệu</a>', '<span class="muted">Bản demo không tải file được. Bản chạy trên máy chủ có nút tải bản sao lưu ở đây.</span>')
 assert '#/' not in app
 
 body = html.split('<body>')[1].split('<script')[0]

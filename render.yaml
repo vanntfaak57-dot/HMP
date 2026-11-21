@@ -1,0 +1,19 @@
+# Triển khai 1 bước trên Render.com (Blueprint): New + > Blueprint > chọn kho GitHub chứa mã này
+services:
+  - type: web
+    name: kho-etc-mda
+    runtime: docker
+    plan: starter          # gói có ổ đĩa lưu trữ bền vững (gói Free không giữ được dữ liệu)
+    region: singapore
+    healthCheckPath: /healthz
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: ADMIN_PASSWORD
+        generateValue: true   # xem giá trị trong mục Environment của dịch vụ để đăng nhập lần đầu
+      - key: COOKIE_SECURE
+        value: "1"
+      - key: TRUST_PROXY
+        value: "1"
