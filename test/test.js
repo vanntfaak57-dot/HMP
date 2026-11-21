@@ -231,5 +231,9 @@ const step = (s) => console.log('✔', s);
     step(`Nhật ký truy cập ghi ${au.total} sự kiện`);
     console.log('\nTẤT CẢ KIỂM THỬ ĐỀU ĐẠT');
   } catch (e) { console.error('✘', e); process.exitCode = 1; }
-  finally { if (srv) srv.kill(); fs.rmSync(dir, { recursive: true, force: true }); }
+  finally {
+    // đợi phần mềm tắt hẳn rồi mới xóa thư mục tạm (Windows khóa file CSDL đến khi tiến trình thoát)
+    if (srv) { srv.kill(); if (srv.exitCode === null) await new Promise((r) => srv.on('exit', r)); }
+    try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch { /* bỏ qua */ }
+  }
 })();

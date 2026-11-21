@@ -137,11 +137,15 @@ const upload = (file) => { const fd = new FormData(); fd.append('file', new Blob
     console.error('✘', e); if (proc) console.error(proc.output()); process.exitCode = 1;
   } finally {
     if (server) server.close();
-    if (proc && proc.exitCode === null) proc.kill();
+    if (proc && proc.exitCode === null) { proc.kill(); await exited(); }
     // dừng tiến trình mới (nếu có) đang giữ cổng
-    try { execFileSync('bash', ['-c', `fuser -k ${PORT}/tcp 2>/dev/null || true`]); } catch { /* bỏ qua */ }
+    try {
+      if (process.platform === 'win32') { if (process.env.APP_BIN) execFileSync('taskkill', ['/F', '/IM', path.basename(process.env.APP_BIN)], { stdio: 'ignore' }); }
+      else execFileSync('bash', ['-c', `fuser -k ${PORT}/tcp 2>/dev/null || true`]);
+    } catch { /* bỏ qua */ }
+    await new Promise((r) => setTimeout(r, 1000));
     fs.rmSync(path.join(ROOT, 'build', 'dist', 'KhoETC-update-9.9.0.khoupd'), { force: true });
     fs.rmSync(path.join(ROOT, 'build', 'dist', 'KhoETC-update-9.9.5.khoupd'), { force: true });
-    fs.rmSync(tmp, { recursive: true, force: true });
+    try { fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch { /* bỏ qua */ }
   }
 })();
