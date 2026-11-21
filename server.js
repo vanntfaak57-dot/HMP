@@ -456,6 +456,33 @@ app.delete('/api/vouchers/:id', canWrite, h((req, res) => {
   res.json({ ok: true });
 }));
 
+// Xóa hàng loạt chứng từ: từng phiếu được xóa riêng (phiếu xuất trước, phiếu nhập sau);
+// phiếu thuộc kỳ đã khóa sổ hoặc làm âm kho thì giữ lại kèm lý do
+app.post('/api/vouchers/bulk-delete', canWrite, h((req, res) => {
+  const ids = [...new Set((req.body?.ids || []).map(Number).filter(Number.isInteger))];
+  if (!ids.length) throw fail('Chưa chọn phiếu nào');
+  if (ids.length > 2000) throw fail('Mỗi lần xóa tối đa 2.000 phiếu');
+  const list = ids.map((id) => getVoucher(id) || { id, missing: true })
+    .sort((a, b) => (a.type === b.type ? 0 : a.type === 'X' ? -1 : 1));
+  const deleted = [], skipped = [];
+  for (const v of list) {
+    if (v.missing) { skipped.push({ number: `#${v.id}`, reason: 'Không còn tồn tại' }); continue; }
+    if (v.locked) { skipped.push({ number: v.number, date: v.date, reason: `Kỳ ${v.date.slice(5, 7)}/${v.date.slice(0, 4)} đã khóa sổ` }); continue; }
+    try {
+      tx(() => {
+        db.prepare('DELETE FROM vouchers WHERE id = ?').run(v.id);
+        costing.checkNoNegative(v.lines.map((l) => l.item_id));
+        costing.markDirty(v.date.slice(0, 7));
+      });
+      deleted.push(v.number);
+      audit(req, 'VOUCHER_DELETE', summary(v) + ' (xóa hàng loạt)');
+    } catch (e) {
+      skipped.push({ number: v.number, date: v.date, reason: e.message });
+    }
+  }
+  res.json({ deleted, skipped });
+}));
+
 // ---------------- Đọc PDF ----------------
 app.post('/api/pdf/parse', canWrite, upload.single('file'), h(async (req, res) => {
   if (!req.file) throw fail('Chưa chọn file PDF');

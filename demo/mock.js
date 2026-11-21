@@ -185,7 +185,7 @@
       for (const { l, v } of mv) {
         if (A && v.date <= A) continue;
         bal += v.type === 'N' ? l.qty : -l.qty;
-        if (bal < -EPS) throw fail(`Mã hàng ${it.code} bị âm kho ngày ${v.date} (phiếu ${v.number}), thiếu ${(-bal).toLocaleString('vi-VN')}`);
+        if (bal < -EPS) throw fail(`Mã hàng ${it.code} bị âm kho ngày ${v.date.split('-').reverse().join('/')} (phiếu ${v.number}), thiếu ${(-bal).toLocaleString('vi-VN')}`);
       }
     }
   }
@@ -604,6 +604,22 @@
     if (old.locked) throw fail(`Kỳ ${old.date.slice(0, 7)} đã khóa sổ`);
     tx(() => { D.vouchers = D.vouchers.filter((x) => x.id !== old.id); D.lines = D.lines.filter((l) => l.voucher_id !== old.id); checkNoNegative(old.lines.map((l) => l.item_id)); markDirty(old.date.slice(0, 7)); });
     audit(user, 'VOUCHER_DELETE', summary(old)); return { ok: true };
+  });
+
+  R('POST', '/api/vouchers/bulk-delete', ({ user, body }) => { W(user);
+    const ids = [...new Set((body.ids || []).map(Number).filter(Number.isInteger))];
+    if (!ids.length) throw fail('Chưa chọn phiếu nào');
+    const list = ids.map((id) => getVoucher(id) || { id, missing: true }).sort((a, b) => (a.type === b.type ? 0 : a.type === 'X' ? -1 : 1));
+    const deleted = [], skipped = [];
+    for (const v of list) {
+      if (v.missing) { skipped.push({ number: `#${v.id}`, reason: 'Không còn tồn tại' }); continue; }
+      if (v.locked) { skipped.push({ number: v.number, date: v.date, reason: `Kỳ ${v.date.slice(5, 7)}/${v.date.slice(0, 4)} đã khóa sổ` }); continue; }
+      try {
+        tx(() => { D.vouchers = D.vouchers.filter((x) => x.id !== v.id); D.lines = D.lines.filter((l) => l.voucher_id !== v.id); checkNoNegative(v.lines.map((l) => l.item_id)); markDirty(v.date.slice(0, 7)); });
+        deleted.push(v.number); audit(user, 'VOUCHER_DELETE', summary(v) + ' (xóa hàng loạt)');
+      } catch (e) { skipped.push({ number: v.number, date: v.date, reason: e.message }); }
+    }
+    return { deleted, skipped };
   });
 
   R('POST', '/api/pdf/parse', async ({ user, body, query }) => {

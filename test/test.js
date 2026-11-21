@@ -123,9 +123,18 @@ const step = (s) => console.log('✔', s);
 
     await ok('/api/periods/2026-10/lock', { method: 'POST', body: { locked: true } });
     assert.equal((await api(`/api/vouchers/${pdfV.id}`, { method: 'DELETE' })).status, 400); step('Khóa sổ chặn sửa/xóa chứng từ');
+    const allV = [...await ok('/api/vouchers?type=N'), ...await ok('/api/vouchers?type=X')];
+    const nNov = allV.find((v) => v.type === 'N' && v.date === '2026-11-03'), xNov = allV.find((v) => v.type === 'X' && v.date === '2026-11-10');
+    const b1 = await ok('/api/vouchers/bulk-delete', { method: 'POST', body: { ids: [pdfV.id, nNov.id] } });
+    assert.deepEqual(b1.deleted, []);
+    assert.match(b1.skipped.find((x) => x.number === pdfV.number).reason, /khóa sổ/);
+    assert.match(b1.skipped.find((x) => x.number === nNov.number).reason, /âm kho/);
+    const b2 = await ok('/api/vouchers/bulk-delete', { method: 'POST', body: { ids: [nNov.id, xNov.id] } }); // xóa phiếu xuất trước nên phiếu nhập xóa được
+    assert.equal(b2.deleted.length, 2); assert.equal(b2.skipped.length, 0);
+    step('Xóa hàng loạt phiếu: giữ lại phiếu kỳ đã khóa sổ / làm âm kho, xóa đúng thứ tự xuất trước nhập sau');
 
     const ledger = await ok(`/api/reports/ledger?item_id=${A.id}&from=2026-10&to=2026-11`);
-    assert.equal(ledger.lines.at(-1).bal_qty, 0); step('Sổ chi tiết vật tư');
+    assert.equal(ledger.lines.at(-1).bal_qty, 30); step('Sổ chi tiết vật tư (sau khi xóa 2 phiếu tháng 11: tồn 30)');
     const x = await fetch(B + '/api/reports/nxt.xlsx?from=2026-10&to=2026-11', { headers: { cookie } });
     assert.equal(x.status, 200); assert.ok((await x.arrayBuffer()).byteLength > 1000); step('Xuất Excel NXT');
 

@@ -149,7 +149,7 @@ function checkNoNegative(itemIds) {
       if (A && r.date <= A) continue;
       bal += r.type === 'N' ? r.qty : -r.qty;
       if (bal < -EPS) {
-        throw new Error(`Mã hàng ${it.code} bị âm kho ngày ${r.date} (phiếu ${r.number}), thiếu ${fmt(-bal)}`);
+        throw new Error(`Mã hàng ${it.code} bị âm kho ngày ${r.date.split('-').reverse().join('/')} (phiếu ${r.number}), thiếu ${fmt(-bal)}`);
       }
     }
   }

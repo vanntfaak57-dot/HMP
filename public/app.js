@@ -287,6 +287,11 @@ async function pageVouchers(type) {
   const now = todayStr();
   const q = JSON.parse(sessionStorage.getItem('vfilter' + type) || 'null') || { from: now.slice(0, 8) + '01', to: now, q: '' };
   const vpartners = await api('/api/partners?kind=' + (type === 'X' ? 'KH' : 'NCC'));
+  const W = canWrite();
+  const NAME = type === 'N' ? 'phiếu nhập' : 'phiếu xuất';
+  const cols = (type === 'X' ? 8 : 7) + (W ? 1 : 0);
+  const selected = new Set();
+  let rows = [];
   $('#main').innerHTML = `
     <h1>${TYPE[type]}</h1>
     <div class="toolbar">
@@ -295,27 +300,83 @@ async function pageVouchers(type) {
       <input id="vf-q" placeholder="Số phiếu, đối tượng, diễn giải…" value="${esc(q.q)}">
       <button class="btn" id="vf-go">Lọc</button>
       <span class="spacer"></span>
-      ${canWrite() ? `<a class="btn primary" href="#/voucher/new/${type}">+ Thêm ${type === 'N' ? 'phiếu nhập' : 'phiếu xuất'} (nhập tay / từ PDF)</a>` : ''}
+      ${W ? `<a class="btn primary" href="#/voucher/new/${type}">+ Thêm ${NAME} (nhập tay / từ PDF)</a>` : ''}
     </div>
-    <div class="table-wrap"><table><thead><tr><th>Ngày</th><th>Số phiếu</th><th>${type === 'N' ? 'Nhà cung cấp / Người giao' : 'Khách hàng'}</th><th>Diễn giải</th>
+    ${W ? `<div class="bulk-row"><span id="v-bulk" class="bulk-bar" hidden>Đã chọn <b id="v-bulk-count">0</b> phiếu
+      <button class="btn" id="v-bulk-edit" type="button">Sửa phiếu</button>
+      <button class="btn danger" id="v-bulk-del" type="button">Xóa các phiếu đã chọn</button>
+      <button class="btn" id="v-bulk-clear" type="button">Bỏ chọn</button></span></div>` : ''}
+    <div class="table-wrap sticky-head"><table><thead><tr>
+      ${W ? '<th class="chk-col"><label class="chk"><input type="checkbox" id="v-all" aria-label="Chọn tất cả" title="Chọn tất cả"></label></th>' : ''}
+      <th>Ngày</th><th>Số phiếu</th><th>${type === 'N' ? 'Nhà cung cấp / Người giao' : 'Khách hàng'}</th><th>Diễn giải</th>
       <th class="num">${type === 'N' ? 'Giá trị nhập' : 'Doanh thu'}</th>${type === 'X' ? '<th class="num">Giá vốn</th>' : ''}<th>Nguồn</th><th>Trạng thái kỳ</th></tr></thead>
-    <tbody id="v-body"><tr><td colspan="8">Đang tải…</td></tr></tbody><tfoot id="v-foot"></tfoot></table></div>`;
+    <tbody id="v-body"><tr><td colspan="${cols}">Đang tải…</td></tr></tbody><tfoot id="v-foot"></tfoot></table></div>`;
+  const updateSelection = () => {
+    const visible = new Set(rows.map((v) => v.id));
+    for (const id of [...selected]) if (!visible.has(id)) selected.delete(id);
+    $$('#v-body tr[data-id]').forEach((tr) => {
+      const on = selected.has(Number(tr.dataset.id));
+      tr.classList.toggle('sel', on);
+      const cb = $('input[data-sel]', tr); if (cb) cb.checked = on;
+    });
+    const all = $('#v-all');
+    if (all) { all.checked = rows.length > 0 && selected.size === rows.length; all.indeterminate = selected.size > 0 && selected.size < rows.length; }
+    const bar = $('#v-bulk');
+    if (bar) {
+      bar.hidden = selected.size === 0;
+      $('#v-bulk-count').textContent = selected.size.toLocaleString('vi-VN');
+      const one = selected.size === 1 && rows.find((v) => selected.has(v.id));
+      const ed = $('#v-bulk-edit');
+      ed.disabled = !one;
+      ed.textContent = one && one.locked ? 'Xem phiếu' : 'Sửa phiếu';
+      ed.title = one ? '' : 'Chọn đúng 1 phiếu để sửa';
+    }
+  };
   const load = async () => {
     const f = { from: $('#vf-from').value, to: $('#vf-to').value, q: $('#vf-q').value, partner_id: $('#vf-partner').value };
     sessionStorage.setItem('vfilter' + type, JSON.stringify(f));
-    const rows = await api(`/api/vouchers?type=${type}&from=${f.from}&to=${f.to}&q=${encodeURIComponent(f.q)}&partner_id=${f.partner_id}`);
+    rows = await api(`/api/vouchers?type=${type}&from=${f.from}&to=${f.to}&q=${encodeURIComponent(f.q)}&partner_id=${f.partner_id}`);
     let ta = 0, tc = 0;
     $('#v-body').innerHTML = rows.map((v) => {
       ta += v.total_amount; tc += v.total_cost || 0;
       const st = v.locked ? '<span class="badge">Đã khóa sổ</span>' : v.period_status === 'computed' ? '<span class="badge ok">Đã tính giá</span>' : '<span class="badge warn">Chưa tính giá</span>';
-      return `<tr><td>${fmtD(v.date)}</td><td><a href="#/voucher/${v.id}">${esc(v.number)}</a></td><td>${v.partner_code ? `<span class="muted">${esc(v.partner_code)}</span> ` : ''}${esc(v.partner)}</td><td>${esc(v.description)}</td>
+      return `<tr data-id="${v.id}">
+        ${W ? `<td class="chk-col"><label class="chk"><input type="checkbox" data-sel="${v.id}" aria-label="Chọn phiếu ${esc(v.number)}"></label></td>` : ''}
+        <td>${fmtD(v.date)}</td><td><a href="#/voucher/${v.id}">${esc(v.number)}</a></td><td>${v.partner_code ? `<span class="muted">${esc(v.partner_code)}</span> ` : ''}${esc(v.partner)}</td><td>${esc(v.description)}</td>
         <td class="num">${fmtM(v.total_amount)}</td>${type === 'X' ? `<td class="num">${v.uncosted ? '<span class="muted">chưa tính</span>' : fmtM(v.total_cost)}</td>` : ''}
         <td>${v.source === 'pdf' ? 'PDF' : 'Nhập tay'}</td><td>${st}</td></tr>`;
-    }).join('') || '<tr><td colspan="8" class="muted">Không có chứng từ</td></tr>';
-    $('#v-foot').innerHTML = `<tr><td colspan="4">Tổng cộng (${rows.length} phiếu)</td><td class="num">${fmtM(ta)}</td>${type === 'X' ? `<td class="num">${fmtM(tc)}</td>` : ''}<td colspan="2"></td></tr>`;
+    }).join('') || `<tr><td colspan="${cols}" class="muted">Không có chứng từ</td></tr>`;
+    $('#v-foot').innerHTML = `<tr><td colspan="${W ? 5 : 4}">Tổng cộng (${rows.length} phiếu)</td><td class="num">${fmtM(ta)}</td>${type === 'X' ? `<td class="num">${fmtM(tc)}</td>` : ''}<td colspan="2"></td></tr>`;
+    updateSelection();
   };
-  $('#vf-go').addEventListener('click', () => load().catch((e) => toast(e.message, true)));
-  $('#vf-partner').addEventListener('change', () => load().catch((e) => toast(e.message, true)));
+  const reload = () => load().catch((e) => toast(e.message, true));
+  $('#vf-go').addEventListener('click', reload);
+  $('#vf-partner').addEventListener('change', reload);
+  $('#v-body').addEventListener('change', (e) => {
+    const cb = e.target.closest('[data-sel]'); if (!cb) return;
+    if (cb.checked) selected.add(Number(cb.dataset.sel)); else selected.delete(Number(cb.dataset.sel));
+    updateSelection();
+  });
+  $('#v-all')?.addEventListener('change', (e) => { if (e.target.checked) rows.forEach((v) => selected.add(v.id)); else selected.clear(); updateSelection(); });
+  $('#v-bulk-clear')?.addEventListener('click', () => { selected.clear(); updateSelection(); });
+  $('#v-bulk-edit')?.addEventListener('click', () => { if (selected.size === 1) location.hash = `#/voucher/${[...selected][0]}`; });
+  $('#v-bulk-del')?.addEventListener('click', async () => {
+    const chosen = rows.filter((v) => selected.has(v.id));
+    if (!chosen.length) return;
+    const preview = chosen.slice(0, 8).map((v) => v.number).join(', ') + (chosen.length > 8 ? ` và ${chosen.length - 8} phiếu khác` : '');
+    if (!confirm(`Xóa ${chosen.length} ${NAME}: ${preview}? Phiếu thuộc kỳ đã khóa sổ hoặc làm âm kho sẽ được giữ lại.`)) return;
+    try {
+      const r = await api('/api/vouchers/bulk-delete', { method: 'POST', body: { ids: chosen.map((v) => v.id) } });
+      toast(`Đã xóa ${r.deleted.length} phiếu${r.skipped.length ? `, giữ lại ${r.skipped.length} phiếu` : ''}`);
+      selected.clear();
+      await load();
+      if (r.skipped.length) {
+        modal(`<h2>Không xóa được ${r.skipped.length} phiếu</h2><div class="table-wrap"><table><thead><tr><th>Số phiếu</th><th>Ngày</th><th>Lý do</th></tr></thead><tbody>
+          ${r.skipped.map((x) => `<tr><td>${esc(x.number)}</td><td>${fmtD(x.date)}</td><td>${esc(x.reason)}</td></tr>`).join('')}</tbody></table></div>
+          <div class="actions"><button class="btn primary" data-close>Đóng</button></div>`);
+      }
+    } catch (err) { toast(err.message, true); }
+  });
   await load();
 }
 
