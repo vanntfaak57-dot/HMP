@@ -456,11 +456,12 @@ app.put('/api/vouchers/:id', canWrite, h((req, res) => {
   const old = getVoucher(req.params.id);
   if (!old) throw fail('Không tìm thấy chứng từ', 404);
   if (old.locked) throw fail(`Kỳ ${old.date.slice(0, 7)} đã khóa sổ`);
-  const v = validateVoucher({ ...req.body, type: old.type, attachment: req.body.attachment ?? old.attachment });
+  if (old.posted) throw fail(`Chứng từ ${old.number} đã ghi sổ. Bấm "Bỏ ghi" trước khi sửa.`);
+  const v = validateVoucher({ ...req.body, type: old.type, number: String(req.body.number ?? '').trim() || old.number, attachment: req.body.attachment ?? old.attachment });
   const dup = db.prepare('SELECT id FROM vouchers WHERE type = ? AND number = ? AND id <> ?').get(v.type, v.number, old.id);
   if (dup) throw fail(`Số phiếu ${v.number} đã tồn tại`);
   tx(() => {
-    db.prepare(`UPDATE vouchers SET number=?, date=?, partner_id=?, partner=?, address=?, description=?, ref_no=?, attachment=?, updated_by=?, updated_at=? WHERE id=?`)
+    db.prepare(`UPDATE vouchers SET posted=1, number=?, date=?, partner_id=?, partner=?, address=?, description=?, ref_no=?, attachment=?, updated_by=?, updated_at=? WHERE id=?`)
       .run(v.number, v.date, v.partner_id, v.partner, v.address, v.description, v.ref_no, v.attachment, req.user.username, now(), old.id);
     saveExtra(old.id, v);
     db.prepare('DELETE FROM voucher_lines WHERE voucher_id = ?').run(old.id);
@@ -469,6 +470,7 @@ app.put('/api/vouchers/:id', canWrite, h((req, res) => {
     costing.markDirty((old.date < v.date ? old.date : v.date).slice(0, 7));
   });
   audit(req, 'VOUCHER_UPDATE', `${summary(v)} | trước khi sửa: ${summary(old)}`);
+  audit(req, 'VOUCHER_POST', `Ghi sổ ${TYPE_NAME[v.type]} ${v.number}`);
   res.json({ ok: true });
 }));
 
@@ -483,6 +485,41 @@ app.delete('/api/vouchers/:id', canWrite, h((req, res) => {
   });
   audit(req, 'VOUCHER_DELETE', summary(old));
   res.json({ ok: true });
+}));
+
+// Ghi sổ / bỏ ghi chứng từ. Bỏ ghi: chứng từ không còn được tính vào tồn kho, giá vốn, báo cáo cho đến khi ghi sổ lại.
+function setPosted(v, post, req) {
+  if (v.locked) throw fail(`Kỳ ${v.date.slice(5, 7)}/${v.date.slice(0, 4)} đã khóa sổ`);
+  if (!!v.posted === post) return false;
+  tx(() => {
+    db.prepare('UPDATE vouchers SET posted = ?, updated_by = ?, updated_at = ? WHERE id = ?').run(post ? 1 : 0, req.user.username, now(), v.id);
+    if (!post) db.prepare('UPDATE voucher_lines SET cost_price = NULL, cost_amount = NULL WHERE voucher_id = ?').run(v.id);
+    costing.checkNoNegative(v.lines.map((l) => l.item_id));
+    costing.markDirty(v.date.slice(0, 7));
+  });
+  audit(req, post ? 'VOUCHER_POST' : 'VOUCHER_UNPOST', `${post ? 'Ghi sổ' : 'Bỏ ghi'} ${TYPE_NAME[v.type]} ${v.number} ngày ${v.date}`);
+  return true;
+}
+app.post('/api/vouchers/:id/post', canWrite, h((req, res) => {
+  const v = getVoucher(req.params.id);
+  if (!v) throw fail('Không tìm thấy chứng từ', 404);
+  setPosted(v, req.body?.post !== false, req);
+  res.json({ ok: true });
+}));
+// Ghi sổ / bỏ ghi hàng loạt: bỏ ghi phiếu xuất trước phiếu nhập, ghi sổ phiếu nhập trước phiếu xuất
+app.post('/api/vouchers/bulk-post', canWrite, h((req, res) => {
+  const post = req.body?.post !== false;
+  const ids = [...new Set((req.body?.ids || []).map(Number).filter(Number.isInteger))];
+  if (!ids.length) throw fail('Chưa chọn phiếu nào');
+  const list = ids.map((id) => getVoucher(id) || { id, missing: true })
+    .sort((a, b) => (a.type === b.type ? 0 : (a.type === 'N') === post ? -1 : 1));
+  const done = [], skipped = [];
+  for (const v of list) {
+    if (v.missing) { skipped.push({ number: `#${v.id}`, reason: 'Không còn tồn tại' }); continue; }
+    try { if (setPosted(v, post, req)) done.push(v.number); }
+    catch (e) { skipped.push({ number: v.number, date: v.date, reason: e.message }); }
+  }
+  res.json({ done, skipped });
 }));
 
 // Xóa hàng loạt chứng từ: từng phiếu được xóa riêng (phiếu xuất trước, phiếu nhập sau);
@@ -518,7 +555,7 @@ app.get('/api/last-prices', h((req, res) => {
   if (!pid) return res.json({});
   const rows = db.prepare(`SELECT l.item_id, l.unit_price, l.price_vat, l.discount_rate, l.vat_rate, v.date, v.number
     FROM voucher_lines l JOIN vouchers v ON v.id = l.voucher_id
-    WHERE v.partner_id = ? AND v.type = ? AND v.id <> ? ORDER BY v.date DESC, v.id DESC, l.sort DESC`).all(pid, type, Number(req.query.exclude) || 0);
+    WHERE v.posted = 1 AND v.partner_id = ? AND v.type = ? AND v.id <> ? ORDER BY v.date DESC, v.id DESC, l.sort DESC`).all(pid, type, Number(req.query.exclude) || 0);
   const out = {};
   for (const r of rows) if (!out[r.item_id]) out[r.item_id] = r;
   res.json(out);
@@ -651,7 +688,7 @@ app.get('/api/reports/ledger', h((req, res) => {
   const first = comp.months[from]?.rows.get(it.id);
   const lines = db.prepare(`SELECT l.id, l.qty, l.unit_price, l.amount, v.id voucher_id, v.type, v.number, v.date, v.partner, v.description
     FROM voucher_lines l JOIN vouchers v ON v.id = l.voucher_id
-    WHERE l.item_id = ? AND substr(v.date,1,7) BETWEEN ? AND ? ORDER BY v.date, v.type, v.id, l.sort`).all(it.id, from, to);
+    WHERE l.item_id = ? AND v.posted = 1 AND substr(v.date,1,7) BETWEEN ? AND ? ORDER BY v.date, v.type, v.id, l.sort`).all(it.id, from, to);
   let bq = first ? first.open_qty : 0, bv = first ? first.open_val : 0;
   const out = lines.map((l) => {
     const m = l.date.slice(0, 7);
@@ -666,7 +703,7 @@ app.get('/api/reports/ledger', h((req, res) => {
 
 function analyticsCtx() {
   const lines = db.prepare(`SELECT l.id, l.item_id, l.qty, l.amount, v.id vid, v.type, v.number, v.date, v.partner_id, v.partner
-    FROM voucher_lines l JOIN vouchers v ON v.id = l.voucher_id WHERE v.date > ?`).all(getSetting('opening_date') || '0000-00-00')
+    FROM voucher_lines l JOIN vouchers v ON v.id = l.voucher_id WHERE v.posted = 1 AND v.date > ?`).all(getSetting('opening_date') || '0000-00-00')
     .map((r) => ({ id: r.id, item_id: r.item_id, qty: r.qty, amount: r.amount, v: { id: r.vid, type: r.type, number: r.number, date: r.date, partner_id: r.partner_id, partner: r.partner } }));
   return { lines, items: db.prepare('SELECT id, code, name, unit FROM items').all(), partners: db.prepare('SELECT id, kind, code, name FROM partners').all(), compute: costing.compute };
 }
@@ -697,7 +734,7 @@ app.get('/api/dashboard', h((req, res) => {
     }
   }
   const m = db.prepare(`SELECT v.type, COUNT(DISTINCT v.id) c, COALESCE(SUM(l.amount),0) amt FROM vouchers v LEFT JOIN voucher_lines l ON l.voucher_id = v.id
-    WHERE substr(v.date,1,7) = ? GROUP BY v.type`).all(cur);
+    WHERE v.posted = 1 AND substr(v.date,1,7) = ? GROUP BY v.type`).all(cur);
   res.json({
     month: cur, opening_date: getSetting('opening_date'),
     items: db.prepare('SELECT COUNT(*) c FROM items').get().c,

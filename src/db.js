@@ -197,6 +197,7 @@ for (const [table, col, def] of [
   ['vouchers', 'delivery_place', 'TEXT'], ['vouchers', 'salesperson', 'TEXT'], ['vouchers', 'warehouse', 'TEXT'],
   ['voucher_lines', 'discount_rate', 'REAL NOT NULL DEFAULT 0'], ['voucher_lines', 'vat_rate', 'TEXT'], ['voucher_lines', 'vat_amount', 'REAL NOT NULL DEFAULT 0'], ['voucher_lines', 'price_vat', 'REAL'],
   ['items', 'sale_price', 'REAL'], ['items', 'sale_price_vat', 'REAL'],
+  ['vouchers', 'posted', 'INTEGER NOT NULL DEFAULT 1'], // 1: đã ghi sổ, 0: đã bỏ ghi (không tính vào sổ sách)
 ]) {
   if (!db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
 }

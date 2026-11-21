@@ -52,7 +52,7 @@ function compute(uptoMonth) {
   const lines = db.prepare(`
     SELECT l.id, l.item_id, l.qty, l.amount, v.type, v.date
     FROM voucher_lines l JOIN vouchers v ON v.id = l.voucher_id
-    WHERE v.date > ? AND substr(v.date, 1, 7) <= ?
+    WHERE v.posted = 1 AND v.date > ? AND substr(v.date, 1, 7) <= ?
     ORDER BY v.date, v.type, v.id, l.sort, l.id`).all(A, uptoMonth);
 
   const byMonth = new Map();
@@ -140,7 +140,7 @@ function isLocked(month) {
 function checkNoNegative(itemIds) {
   const A = openingDate();
   const stmt = db.prepare(`SELECT v.date, v.type, v.number, l.qty FROM voucher_lines l JOIN vouchers v ON v.id = l.voucher_id
-    WHERE l.item_id = ? ORDER BY v.date, CASE v.type WHEN 'N' THEN 0 ELSE 1 END, v.id`);
+    WHERE l.item_id = ? AND v.posted = 1 ORDER BY v.date, CASE v.type WHEN 'N' THEN 0 ELSE 1 END, v.id`);
   for (const id of new Set(itemIds)) {
     const it = db.prepare('SELECT code, opening_qty FROM items WHERE id = ?').get(id);
     if (!it) continue;
@@ -163,7 +163,7 @@ function stockQtyAt(date, excludeVoucherId = 0) {
       COALESCE(SUM(CASE WHEN v.type='N' THEN l.qty WHEN v.type='X' THEN -l.qty END), 0) AS qty
     FROM items i
     LEFT JOIN voucher_lines l ON l.item_id = i.id
-    LEFT JOIN vouchers v ON v.id = l.voucher_id AND v.date > ? AND v.date <= ? AND v.id <> ?
+    LEFT JOIN vouchers v ON v.id = l.voucher_id AND v.posted = 1 AND v.date > ? AND v.date <= ? AND v.id <> ?
     GROUP BY i.id`).all(A || '0000-00-00', date, excludeVoucherId);
   return Object.fromEntries(rows.map((r) => [r.id, r.qty]));
 }

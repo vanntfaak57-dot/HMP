@@ -98,6 +98,26 @@ const step = (s) => console.log('✔', s);
     assert.equal(lp[I50.id].price_vat, 110250); assert.equal(lp[I50.id].vat_rate, '5');
     assert.deepEqual(await ok(`/api/last-prices?type=X&partner_id=${NCC.id}`), {});
     step('Giá bán trong danh mục (+VAT/-VAT), lưu giá +VAT trên phiếu, giá gần nhất theo khách hàng');
+    // Ghi sổ / bỏ ghi
+    const dv = (await ok('/api/vouchers?type=X')).find((v) => v.date === '2026-12-05');
+    assert.equal(dv.posted, 1);
+    const editPosted = await api(`/api/vouchers/${dv.id}`, { method: 'PUT', body: { date: '2026-12-05', partner_id: KH.id, lines: [{ item_id: I50.id, qty: 3, unit_price: 100000 }] } });
+    assert.equal(editPosted.status, 400); assert.match(editPosted.d.error, /Bỏ ghi/);
+    await ok(`/api/vouchers/${dv.id}/post`, { method: 'POST', body: { post: false } });
+    const stock50 = async () => (await ok('/api/items?date=2026-12-31')).find((i) => i.id === I50.id).stock_qty;
+    assert.equal(await stock50(), 10); // phiếu bỏ ghi không tính vào tồn
+    assert.ok(!(await ok(`/api/last-prices?type=X&partner_id=${KH.id}`))[I50.id]);
+    await ok(`/api/vouchers/${dv.id}`, { method: 'PUT', body: { date: '2026-12-05', partner_id: KH.id, lines: [{ item_id: I50.id, qty: 3, unit_price: 100000 }] } });
+    assert.equal((await ok(`/api/vouchers/${dv.id}`)).posted, 1); assert.equal(await stock50(), 7);
+    const nDec = await ok('/api/vouchers', { method: 'POST', body: { type: 'N', date: '2026-12-01', partner_id: NCC.id, lines: [{ item_id: I50.id, qty: 5, unit_price: 50000 }] } });
+    await ok('/api/vouchers', { method: 'POST', body: { type: 'X', date: '2026-12-06', lines: [{ item_id: I50.id, qty: 12, unit_price: 100000 }] } });
+    const un = await api(`/api/vouchers/${nDec.id}/post`, { method: 'POST', body: { post: false } });
+    assert.equal(un.status, 400); assert.match(un.d.error, /âm kho/);
+    const bp = await ok('/api/vouchers/bulk-post', { method: 'POST', body: { ids: [nDec.id, dv.id], post: false } }); // bỏ ghi phiếu xuất trước
+    assert.deepEqual(bp.done, [dv.number]); assert.equal(bp.skipped[0].number, (await ok('/api/vouchers/' + nDec.id)).number);
+    const bp2 = await ok('/api/vouchers/bulk-post', { method: 'POST', body: { ids: [dv.id], post: true } });
+    assert.equal(bp2.done.length, 1);
+    step('Ghi sổ / bỏ ghi: phiếu đã ghi sổ không sửa được, bỏ ghi thì không tính vào tồn kho, chặn bỏ ghi gây âm kho');
     const bd = await ok('/api/items/bulk-delete', { method: 'POST', body: { ids: [V.id, A.id, 99999] } });
     assert.deepEqual(bd.deleted, ['VT009']);
     assert.deepEqual(bd.skipped.map((s) => s.code), ['VT001', '#99999']);

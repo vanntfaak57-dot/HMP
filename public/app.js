@@ -12,7 +12,7 @@ const TYPE = { N: 'Phiếu nhập kho', X: 'Phiếu xuất kho bán hàng' };
 const ACTIONS = {
   LOGIN_OK: 'Đăng nhập', LOGIN_FAIL: 'Đăng nhập thất bại', LOGOUT: 'Đăng xuất', PASSWORD_CHANGE: 'Đổi mật khẩu',
   ITEM_CREATE: 'Thêm mã hàng', ITEM_UPDATE: 'Sửa mã hàng', ITEM_DELETE: 'Xóa mã hàng', ITEM_BULK_DELETE: 'Xóa hàng loạt mã hàng', ITEM_IMPORT: 'Nhập Excel danh mục',
-  VOUCHER_CREATE: 'Thêm chứng từ', VOUCHER_UPDATE: 'Sửa chứng từ', VOUCHER_DELETE: 'Xóa chứng từ', PDF_UPLOAD: 'Tải PDF',
+  VOUCHER_CREATE: 'Thêm chứng từ', VOUCHER_UPDATE: 'Sửa chứng từ', VOUCHER_DELETE: 'Xóa chứng từ', VOUCHER_POST: 'Ghi sổ chứng từ', VOUCHER_UNPOST: 'Bỏ ghi chứng từ', PDF_UPLOAD: 'Tải PDF',
   COSTING_RUN: 'Tính giá xuất kho', PERIOD_LOCK: 'Khóa sổ', PERIOD_UNLOCK: 'Mở khóa sổ', USER_CREATE: 'Thêm người dùng',
   USER_UPDATE: 'Sửa người dùng', PARTNER_CREATE: 'Thêm KH/NCC', PARTNER_UPDATE: 'Sửa KH/NCC', PARTNER_DELETE: 'Xóa KH/NCC', PARTNER_IMPORT: 'Nhập Excel KH/NCC', SETTINGS_UPDATE: 'Sửa cài đặt', EXPORT: 'Xuất báo cáo',
 };
@@ -305,7 +305,7 @@ async function pageVouchers(type) {
   const vpartners = await api('/api/partners?kind=' + (type === 'X' ? 'KH' : 'NCC'));
   const W = canWrite();
   const NAME = type === 'N' ? 'phiếu nhập' : 'phiếu xuất';
-  const cols = (type === 'X' ? 8 : 7) + (W ? 1 : 0);
+  const cols = (type === 'X' ? 9 : 8) + (W ? 1 : 0);
   const selected = new Set();
   let rows = [];
   $('#main').innerHTML = `
@@ -319,13 +319,15 @@ async function pageVouchers(type) {
       ${W ? `<a class="btn primary" href="#/voucher/new/${type}">+ Thêm ${NAME} (nhập tay / từ PDF)</a>` : ''}
     </div>
     ${W ? `<div class="bulk-row"><span id="v-bulk" class="bulk-bar" hidden>Đã chọn <b id="v-bulk-count">0</b> phiếu
-      <button class="btn" id="v-bulk-edit" type="button">Sửa phiếu</button>
+      <button class="btn" id="v-bulk-edit" type="button">Mở phiếu</button>
+      <button class="btn" id="v-bulk-post" type="button">Ghi sổ</button>
+      <button class="btn" id="v-bulk-unpost" type="button">Bỏ ghi</button>
       <button class="btn danger" id="v-bulk-del" type="button">Xóa các phiếu đã chọn</button>
       <button class="btn" id="v-bulk-clear" type="button">Bỏ chọn</button></span></div>` : ''}
     <div class="table-wrap sticky-head"><table><thead><tr>
       ${W ? '<th class="chk-col"><label class="chk"><input type="checkbox" id="v-all" aria-label="Chọn tất cả" title="Chọn tất cả"></label></th>' : ''}
       <th>Ngày</th><th>Số phiếu</th><th>${type === 'N' ? 'Nhà cung cấp / Người giao' : 'Khách hàng'}</th><th>Diễn giải</th>
-      <th class="num">${type === 'N' ? 'Giá trị nhập' : 'Doanh thu'}</th>${type === 'X' ? '<th class="num">Giá vốn</th>' : ''}<th>Nguồn</th><th>Trạng thái kỳ</th></tr></thead>
+      <th class="num">${type === 'N' ? 'Giá trị nhập' : 'Doanh thu'}</th>${type === 'X' ? '<th class="num">Giá vốn</th>' : ''}<th>Nguồn</th><th>Ghi sổ</th><th>Trạng thái kỳ</th></tr></thead>
     <tbody id="v-body"><tr><td colspan="${cols}">Đang tải…</td></tr></tbody><tfoot id="v-foot"></tfoot></table></div>`;
   const updateSelection = () => {
     const visible = new Set(rows.map((v) => v.id));
@@ -344,8 +346,11 @@ async function pageVouchers(type) {
       const one = selected.size === 1 && rows.find((v) => selected.has(v.id));
       const ed = $('#v-bulk-edit');
       ed.disabled = !one;
-      ed.textContent = one && one.locked ? 'Xem phiếu' : 'Sửa phiếu';
-      ed.title = one ? '' : 'Chọn đúng 1 phiếu để sửa';
+      ed.textContent = 'Mở phiếu';
+      ed.title = one ? (one.posted ? 'Phiếu đã ghi sổ: mở để xem, bấm Bỏ ghi trong phiếu nếu cần sửa' : 'Mở để sửa') : 'Chọn đúng 1 phiếu';
+      const chosen = rows.filter((v) => selected.has(v.id));
+      $('#v-bulk-post').disabled = !chosen.some((v) => !v.posted);
+      $('#v-bulk-unpost').disabled = !chosen.some((v) => v.posted);
     }
   };
   const load = async () => {
@@ -360,9 +365,9 @@ async function pageVouchers(type) {
         ${W ? `<td class="chk-col"><label class="chk"><input type="checkbox" data-sel="${v.id}" aria-label="Chọn phiếu ${esc(v.number)}"></label></td>` : ''}
         <td>${fmtD(v.date)}</td><td><a href="#/voucher/${v.id}">${esc(v.number)}</a></td><td>${v.partner_code ? `<span class="muted">${esc(v.partner_code)}</span> ` : ''}${esc(v.partner)}</td><td>${esc(v.description)}</td>
         <td class="num">${fmtM(v.total_amount)}</td>${type === 'X' ? `<td class="num">${v.uncosted ? '<span class="muted">chưa tính</span>' : fmtM(v.total_cost)}</td>` : ''}
-        <td>${v.source === 'pdf' ? 'PDF' : 'Nhập tay'}</td><td>${st}</td></tr>`;
+        <td>${v.source === 'pdf' ? 'PDF' : 'Nhập tay'}</td><td>${v.posted ? '<span class="badge ok">Đã ghi sổ</span>' : '<span class="badge warn">Chưa ghi sổ</span>'}</td><td>${st}</td></tr>`;
     }).join('') || `<tr><td colspan="${cols}" class="muted">Không có chứng từ</td></tr>`;
-    $('#v-foot').innerHTML = `<tr><td colspan="${W ? 5 : 4}">Tổng cộng (${rows.length} phiếu)</td><td class="num">${fmtM(ta)}</td>${type === 'X' ? `<td class="num">${fmtM(tc)}</td>` : ''}<td colspan="2"></td></tr>`;
+    $('#v-foot').innerHTML = `<tr><td colspan="${W ? 5 : 4}">Tổng cộng (${rows.length} phiếu)</td><td class="num">${fmtM(ta)}</td>${type === 'X' ? `<td class="num">${fmtM(tc)}</td>` : ''}<td colspan="3"></td></tr>`;
     updateSelection();
   };
   const reload = () => load().catch((e) => toast(e.message, true));
@@ -375,6 +380,23 @@ async function pageVouchers(type) {
   });
   $('#v-all')?.addEventListener('change', (e) => { if (e.target.checked) rows.forEach((v) => selected.add(v.id)); else selected.clear(); updateSelection(); });
   $('#v-bulk-clear')?.addEventListener('click', () => { selected.clear(); updateSelection(); });
+  const bulkPost = async (post) => {
+    const chosen = rows.filter((v) => selected.has(v.id) && !!v.posted !== post);
+    if (!chosen.length) return;
+    if (!post && !confirm(`Bỏ ghi ${chosen.length} phiếu? Phiếu bỏ ghi sẽ không được tính vào tồn kho, giá vốn và báo cáo cho đến khi ghi sổ lại.`)) return;
+    try {
+      const r = await api('/api/vouchers/bulk-post', { method: 'POST', body: { ids: chosen.map((v) => v.id), post } });
+      toast(`Đã ${post ? 'ghi sổ' : 'bỏ ghi'} ${r.done.length} phiếu${r.skipped.length ? `, ${r.skipped.length} phiếu không thực hiện được` : ''}`);
+      await load();
+      if (r.skipped.length) {
+        modal(`<h2>Không ${post ? 'ghi sổ' : 'bỏ ghi'} được ${r.skipped.length} phiếu</h2><div class="table-wrap"><table><thead><tr><th>Số phiếu</th><th>Ngày</th><th>Lý do</th></tr></thead><tbody>
+          ${r.skipped.map((x) => `<tr><td>${esc(x.number)}</td><td>${fmtD(x.date)}</td><td>${esc(x.reason)}</td></tr>`).join('')}</tbody></table></div>
+          <div class="actions"><button class="btn primary" data-close>Đóng</button></div>`);
+      }
+    } catch (err) { toast(err.message, true); }
+  };
+  $('#v-bulk-post')?.addEventListener('click', () => bulkPost(true));
+  $('#v-bulk-unpost')?.addEventListener('click', () => bulkPost(false));
   $('#v-bulk-edit')?.addEventListener('click', () => { if (selected.size === 1) location.hash = `#/voucher/${[...selected][0]}`; });
   $('#v-bulk-del')?.addEventListener('click', async () => {
     const chosen = rows.filter((v) => selected.has(v.id));
@@ -406,7 +428,9 @@ async function pageVoucherForm(type, id) {
   }
   $('#main').dataset.vtype = type;
   let items = await api(`/api/items?date=${v.date}&exclude=${id || 0}`);
-  const editable = canWrite() && !v.locked;
+  const posted = !!(id && v.posted);
+  // Phiếu đã ghi sổ chỉ xem; muốn sửa phải Bỏ ghi
+  const editable = canWrite() && !v.locked && !posted;
   let lines = v.lines.map((l) => ({ item_id: l.item_id, qty: l.qty, unit_price: l.unit_price, price_vat: l.price_vat, mode: l.price_vat != null ? 'gross' : 'net', discount_rate: l.discount_rate || 0, amount: l.amount, vat_rate: l.vat_rate ?? '', cost_price: l.cost_price, cost_amount: l.cost_amount }));
   if (!lines.length) lines.push({});
   let unmatched = [];
@@ -449,10 +473,14 @@ async function pageVoucherForm(type, id) {
   $('#main').innerHTML = `
     <div class="toolbar"><a class="btn" href="#/vouchers/${type}">← Danh sách</a><h1 style="margin:0">${TYPE[type]} ${id ? esc(v.number) : '(mới)'}</h1>
       <span class="spacer"></span>
+      ${id && canWrite() && !v.locked && posted ? `<button class="btn" id="v-unpost" title="Bỏ ghi để sửa chứng từ">Bỏ ghi</button>` : ''}
+      ${id && canWrite() && !v.locked && !posted ? `<button class="btn" id="v-post" title="Ghi sổ lại, không thay đổi nội dung">Ghi sổ</button>` : ''}
       ${id ? `<button class="btn" id="v-print">In phiếu</button>` : ''}
       ${state.attachment ? `<a class="btn" target="_blank" href="/api/attachments/${state.attachment}">Xem PDF gốc</a>` : ''}
     </div>
-    ${v.locked ? '<div class="alert">Kỳ kế toán của chứng từ này đã khóa sổ – chỉ xem.</div>' : ''}
+    ${v.locked ? '<div class="alert">Kỳ kế toán của chứng từ này đã khóa sổ – chỉ xem.</div>'
+      : posted ? `<div class="alert info post-state"><span class="badge ok">Đã ghi sổ</span> Chứng từ chỉ xem.${canWrite() ? ' Muốn sửa, bấm <b>Bỏ ghi</b>, sửa xong bấm <b>Cất &amp; ghi sổ</b>.' : ''}</div>`
+      : id ? '<div class="alert post-state"><span class="badge warn">Chưa ghi sổ</span> Chứng từ đang được sửa và <b>không được tính</b> vào tồn kho, giá vốn, báo cáo. Sửa xong bấm <b>Cất &amp; ghi sổ</b>.</div>' : ''}
     ${editable ? `<div class="dropzone" id="pdf-drop">Kéo thả hoặc <b>bấm để chọn file PDF</b> ${X ? 'phiếu xuất kho / hóa đơn bán hàng' : 'phiếu nhập kho'} – hệ thống sẽ đọc và điền sẵn nội dung bên dưới
       <input type="file" id="pdf-file" accept="application/pdf" hidden></div>` : ''}
     <div id="pdf-msg" style="margin-top:10px"></div>
@@ -461,7 +489,7 @@ async function pageVoucherForm(type, id) {
         <label>Số phiếu<input name="number" value="${esc(v.number)}"></label>
         <label>Ngày chứng từ<input name="date" type="date" value="${v.date}"></label>
         <label>${X ? 'Khách hàng' : 'Nhà cung cấp'} (chọn trong danh mục)<span class="pick-row"><input name="partner_pick" id="v-partner-pick" list="dl-partners" autocomplete="off" placeholder="Gõ mã hoặc tên…" value="${esc(curPartner ? pickLabel(curPartner) : '')}">
-          ${canWrite() && !v.locked ? `<button type="button" class="btn small" id="v-partner-new" title="Thêm ${OBJ} mới vào danh mục">+ Mới</button>` : ''}</span></label>
+          ${editable ? `<button type="button" class="btn small" id="v-partner-new" title="Thêm ${OBJ} mới vào danh mục">+ Mới</button>` : ''}</span></label>
         <label>Tên ${OBJ} in trên phiếu<input name="partner" value="${esc(v.partner)}"></label>
         <label>Mã số thuế ${OBJ}<input name="tax_code" value="${esc(v.tax_code)}"></label>
         <label>Mã kho<input name="warehouse" value="${esc(v.warehouse)}"></label>
@@ -487,11 +515,13 @@ async function pageVoucherForm(type, id) {
     <div class="toolbar" style="margin-top:12px">
       ${editable ? `<button class="btn" id="l-add">+ Thêm dòng</button>` : ''}
       <span class="spacer"></span>
-      ${editable && id ? `<button class="btn danger" id="v-del">Xóa chứng từ</button>` : ''}
-      ${editable ? `<button class="btn primary" id="v-save">Lưu chứng từ</button>` : ''}
+      ${canWrite() && !v.locked && id ? `<button class="btn danger" id="v-del">Xóa chứng từ</button>` : ''}
+      ${editable ? `<button class="btn primary" id="v-save">Cất &amp; ghi sổ</button>` : ''}
     </div>
     ${X ? `<p class="muted">Giá vốn được tính theo phương pháp <b>bình quân gia quyền cuối kỳ</b> (theo tháng) khi chạy <a href="#/costing">Tính giá xuất kho</a>. ${v.period_status === 'dirty' && id ? '<span class="badge warn">Kỳ này có thay đổi, cần tính lại giá</span>' : ''}</p>` : ''}
     ${id ? `<p class="muted">Tạo bởi ${esc(v.created_by)} lúc ${esc(v.created_at)}${v.updated_by ? ` · Sửa lần cuối bởi ${esc(v.updated_by)} lúc ${esc(v.updated_at)}` : ''}</p>` : ''}`;
+
+  if (!editable) $$('#v-head input').forEach((i) => { i.disabled = true; });
 
   // Chọn đối tượng: điền tên và địa chỉ theo danh mục
   function setPartner(p) {
@@ -530,6 +560,7 @@ async function pageVoucherForm(type, id) {
   const byId = (iid) => items.find((i) => i.id == iid);
   const dis = editable ? '' : 'disabled';
   function lastHint(l) {
+    if (!editable) return '';
     const lp = suggestOf(l);
     if (!lp) return '';
     const g = lp.price_vat != null ? `${fmtN(lp.price_vat)} (+VAT)` : `${fmtN(lp.unit_price)} (-VAT)`;
@@ -700,7 +731,7 @@ async function pageVoucherForm(type, id) {
       lines: lines.filter((l) => l.item_id).map((l) => ({ ...l, price_vat: l.mode === 'gross' && l.price_vat !== '' && l.price_vat != null ? Number(l.price_vat) : null })) };
     try {
       const r = await api(id ? `/api/vouchers/${id}` : '/api/vouchers', { method: id ? 'PUT' : 'POST', body });
-      toast('Đã lưu chứng từ');
+      toast('Đã cất và ghi sổ chứng từ');
       if (id) route(); else location.hash = `#/voucher/${r.id}`;
     } catch (err) { toast(err.message, true); }
   });
@@ -709,6 +740,15 @@ async function pageVoucherForm(type, id) {
     try { await api(`/api/vouchers/${id}`, { method: 'DELETE' }); toast('Đã xóa'); location.hash = `#/vouchers/${type}`; } catch (err) { toast(err.message, true); }
   });
   $('#v-print')?.addEventListener('click', () => printVoucher(v));
+  $('#v-unpost')?.addEventListener('click', async () => {
+    if (!confirm(`Bỏ ghi ${TYPE[type]} ${v.number}? Trong lúc chưa ghi sổ, phiếu không được tính vào tồn kho, giá vốn và báo cáo.`)) return;
+    try { await api(`/api/vouchers/${id}/post`, { method: 'POST', body: { post: false } }); toast('Đã bỏ ghi, có thể sửa chứng từ'); route(); }
+    catch (err) { toast(err.message, true); }
+  });
+  $('#v-post')?.addEventListener('click', async () => {
+    try { await api(`/api/vouchers/${id}/post`, { method: 'POST', body: { post: true } }); toast('Đã ghi sổ'); route(); }
+    catch (err) { toast(err.message, true); }
+  });
 }
 
 // % thuế dạng số của một dòng (KCT, KKKNT, chưa chọn: 0)

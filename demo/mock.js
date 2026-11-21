@@ -2,7 +2,7 @@
 // Logic nghiệp vụ được chuyển nguyên từ server.js / src/*.js; dữ liệu lưu trong localStorage của trình duyệt.
 'use strict';
 (function () {
-  const DB_KEY = 'kho-demo-v5';
+  const DB_KEY = 'kho-demo-v5'; // phiếu cũ không có cờ posted được coi là đã ghi sổ
   const SID_KEY = 'kho-demo-sid';
   const EPS = 1e-9;
   let D = null;
@@ -129,7 +129,7 @@
     const state = new Map(D.items.map((i) => [i.id, { qty: i.opening_qty, val: i.opening_value }]));
     const vmap = new Map(D.vouchers.map((v) => [v.id, v]));
     const lines = D.lines.map((l) => ({ ...l, v: vmap.get(l.voucher_id) }))
-      .filter((l) => l.v && l.v.date > A && l.v.date.slice(0, 7) <= upto)
+      .filter((l) => l.v && l.v.posted !== 0 && l.v.date > A && l.v.date.slice(0, 7) <= upto)
       .sort((a, b) => cmp(a.v.date, b.v.date) || cmp(a.v.type, b.v.type) || a.v.id - b.v.id || a.sort - b.sort || a.id - b.id);
     const byMonth = new Map();
     for (const l of lines) { const m = l.v.date.slice(0, 7); if (!byMonth.has(m)) byMonth.set(m, []); byMonth.get(m).push(l); }
@@ -181,7 +181,7 @@
     const A = D.settings.opening_date;
     for (const id of new Set(itemIds)) {
       const it = D.items.find((i) => i.id === id); if (!it) continue;
-      const mv = D.lines.filter((l) => l.item_id === id).map((l) => ({ l, v: voucherOf(l) }))
+      const mv = D.lines.filter((l) => l.item_id === id).map((l) => ({ l, v: voucherOf(l) })).filter(({ v }) => v && v.posted !== 0)
         .sort((a, b) => cmp(a.v.date, b.v.date) || cmp(a.v.type, b.v.type) || a.v.id - b.v.id);
       let bal = it.opening_qty;
       for (const { l, v } of mv) {
@@ -196,7 +196,7 @@
     const out = Object.fromEntries(D.items.map((i) => [i.id, i.opening_qty]));
     for (const l of D.lines) {
       const v = voucherOf(l);
-      if (!v || v.id === exclude || v.date <= A || v.date > date) continue;
+      if (!v || v.posted === 0 || v.id === exclude || v.date <= A || v.date > date) continue;
       out[l.item_id] += v.type === 'N' ? l.qty : -l.qty;
     }
     return out;
@@ -332,7 +332,7 @@
   function getVoucher(id) {
     const v = D.vouchers.find((x) => x.id === Number(id)); if (!v) return null;
     const p = period(v.date.slice(0, 7));
-    return { ...v, partner_code: D.partners.find((x) => x.id === v.partner_id)?.code || null, period_status: p?.status || null, locked: p?.locked ? 1 : 0,
+    return { ...v, posted: v.posted === 0 ? 0 : 1, partner_code: D.partners.find((x) => x.id === v.partner_id)?.code || null, period_status: p?.status || null, locked: p?.locked ? 1 : 0,
       lines: D.lines.filter((l) => l.voucher_id === v.id).sort((a, b) => a.sort - b.sort || a.id - b.id)
         .map((l) => { const it = D.items.find((i) => i.id === l.item_id); return { ...l, code: it.code, name: it.name, unit: it.unit }; }) };
   }
@@ -584,7 +584,7 @@
   function analyticsCtx() {
     const A = D.settings.opening_date || '0000-00-00';
     const vmap = new Map(D.vouchers.map((v) => [v.id, v]));
-    const lines = D.lines.map((l) => ({ id: l.id, item_id: l.item_id, qty: l.qty, amount: l.amount, v: vmap.get(l.voucher_id) })).filter((l) => l.v && l.v.date > A);
+    const lines = D.lines.map((l) => ({ id: l.id, item_id: l.item_id, qty: l.qty, amount: l.amount, v: vmap.get(l.voucher_id) })).filter((l) => l.v && l.v.posted !== 0 && l.v.date > A);
     return { lines, items: D.items, partners: D.partners, compute };
   }
   R('GET', '/api/reports/partners', ({ query }) => { const { from, to } = reportRange(query); return window.KhoAnalytics.partnerSummary(analyticsCtx(), from, to, query.kind); });
@@ -600,7 +600,7 @@
       .sort((a, b) => cmp(b.date, a.date) || b.id - a.id)
       .map((v) => {
         const ls = D.lines.filter((l) => l.voucher_id === v.id); const p = period(v.date.slice(0, 7));
-        return { ...v, partner_code: D.partners.find((x) => x.id === v.partner_id)?.code || null, total_amount: ls.reduce((t, l) => t + l.amount, 0), total_vat: ls.reduce((t, l) => t + (l.vat_amount || 0), 0), total_cost: ls.reduce((t, l) => t + (l.cost_amount || 0), 0), line_count: ls.length,
+        return { ...v, posted: v.posted === 0 ? 0 : 1, partner_code: D.partners.find((x) => x.id === v.partner_id)?.code || null, total_amount: ls.reduce((t, l) => t + l.amount, 0), total_vat: ls.reduce((t, l) => t + (l.vat_amount || 0), 0), total_cost: ls.reduce((t, l) => t + (l.cost_amount || 0), 0), line_count: ls.length,
           uncosted: ls.filter((l) => l.cost_amount == null).length, period_status: p?.status || null, locked: p?.locked ? 1 : 0 };
       });
   });
@@ -610,7 +610,7 @@
     if (D.vouchers.some((x) => x.type === v.type && x.number === v.number)) throw fail(`Số phiếu ${v.number} đã tồn tại`);
     const id = tx(() => {
       const id = nextId('vouchers'); const { lines, ...head } = v;
-      D.vouchers.push({ id, ...head, created_by: user.username, created_at: now() });
+      D.vouchers.push({ id, ...head, posted: 1, created_by: user.username, created_at: now() });
       insertLines(id, lines); checkNoNegative(lines.map((l) => l.item_id)); markDirty(v.date.slice(0, 7));
       return id;
     });
@@ -619,16 +619,18 @@
   R('PUT', '/api/vouchers/:id', ({ user, params, body }) => { W(user);
     const old = getVoucher(params.id); if (!old) throw fail('Không tìm thấy chứng từ', 404);
     if (old.locked) throw fail(`Kỳ ${old.date.slice(0, 7)} đã khóa sổ`);
-    const v = validateVoucher({ ...body, type: old.type, attachment: body.attachment ?? old.attachment });
+    if (old.posted !== 0) throw fail(`Chứng từ ${old.number} đã ghi sổ. Bấm "Bỏ ghi" trước khi sửa.`);
+    const v = validateVoucher({ ...body, type: old.type, number: String(body.number ?? '').trim() || old.number, attachment: body.attachment ?? old.attachment });
     if (D.vouchers.some((x) => x.type === v.type && x.number === v.number && x.id !== old.id)) throw fail(`Số phiếu ${v.number} đã tồn tại`);
     tx(() => {
       const rec = D.vouchers.find((x) => x.id === old.id); const { lines, type, source, ...head } = v;
-      Object.assign(rec, head, { updated_by: user.username, updated_at: now() });
+      Object.assign(rec, head, { posted: 1, updated_by: user.username, updated_at: now() });
       D.lines = D.lines.filter((l) => l.voucher_id !== old.id); insertLines(old.id, lines);
       checkNoNegative([...lines.map((l) => l.item_id), ...old.lines.map((l) => l.item_id)]);
       markDirty((old.date < v.date ? old.date : v.date).slice(0, 7));
     });
-    audit(user, 'VOUCHER_UPDATE', `${summary(v)} | trước khi sửa: ${summary(old)}`); return { ok: true };
+    audit(user, 'VOUCHER_UPDATE', `${summary(v)} | trước khi sửa: ${summary(old)}`);
+    audit(user, 'VOUCHER_POST', `Ghi sổ ${TYPE_NAME[v.type]} ${v.number}`); return { ok: true };
   });
   R('DELETE', '/api/vouchers/:id', ({ user, params }) => { W(user);
     const old = getVoucher(params.id); if (!old) throw fail('Không tìm thấy chứng từ', 404);
@@ -637,10 +639,38 @@
     audit(user, 'VOUCHER_DELETE', summary(old)); return { ok: true };
   });
 
+  function setPosted(v, post, user) {
+    if (v.locked) throw fail(`Kỳ ${v.date.slice(5, 7)}/${v.date.slice(0, 4)} đã khóa sổ`);
+    if ((v.posted !== 0) === post) return false;
+    tx(() => {
+      const rec = D.vouchers.find((x) => x.id === v.id);
+      Object.assign(rec, { posted: post ? 1 : 0, updated_by: user.username, updated_at: now() });
+      if (!post) D.lines.filter((l) => l.voucher_id === v.id).forEach((l) => { l.cost_price = null; l.cost_amount = null; });
+      checkNoNegative(v.lines.map((l) => l.item_id)); markDirty(v.date.slice(0, 7));
+    });
+    audit(user, post ? 'VOUCHER_POST' : 'VOUCHER_UNPOST', `${post ? 'Ghi sổ' : 'Bỏ ghi'} ${TYPE_NAME[v.type]} ${v.number} ngày ${v.date}`);
+    return true;
+  }
+  R('POST', '/api/vouchers/:id/post', ({ user, params, body }) => { W(user);
+    const v = getVoucher(params.id); if (!v) throw fail('Không tìm thấy chứng từ', 404);
+    setPosted(v, body.post !== false, user); return { ok: true };
+  });
+  R('POST', '/api/vouchers/bulk-post', ({ user, body }) => { W(user);
+    const post = body.post !== false;
+    const ids = [...new Set((body.ids || []).map(Number).filter(Number.isInteger))];
+    if (!ids.length) throw fail('Chưa chọn phiếu nào');
+    const list = ids.map((id) => getVoucher(id) || { id, missing: true }).sort((a, b) => (a.type === b.type ? 0 : (a.type === 'N') === post ? -1 : 1));
+    const done = [], skipped = [];
+    for (const v of list) {
+      if (v.missing) { skipped.push({ number: `#${v.id}`, reason: 'Không còn tồn tại' }); continue; }
+      try { if (setPosted(v, post, user)) done.push(v.number); } catch (e) { skipped.push({ number: v.number, date: v.date, reason: e.message }); }
+    }
+    return { done, skipped };
+  });
   R('GET', '/api/last-prices', ({ query }) => {
     const pid = Number(query.partner_id), type = query.type === 'N' ? 'N' : 'X', ex = Number(query.exclude) || 0;
     if (!pid) return {};
-    const vs = D.vouchers.filter((v) => v.partner_id === pid && v.type === type && v.id !== ex).sort((a, b) => cmp(b.date, a.date) || b.id - a.id);
+    const vs = D.vouchers.filter((v) => v.posted !== 0 && v.partner_id === pid && v.type === type && v.id !== ex).sort((a, b) => cmp(b.date, a.date) || b.id - a.id);
     const out = {};
     for (const v of vs) for (const l of D.lines.filter((x) => x.voucher_id === v.id).sort((a, b) => b.sort - a.sort)) {
       if (!out[l.item_id]) out[l.item_id] = { item_id: l.item_id, unit_price: l.unit_price, price_vat: l.price_vat ?? null, discount_rate: l.discount_rate || 0, vat_rate: l.vat_rate ?? null, date: v.date, number: v.number };
@@ -716,7 +746,7 @@
     const it = D.items.find((i) => i.id === Number(query.item_id)); if (!it) throw fail('Chọn mã hàng');
     const comp = compute(to); const first = comp.months[from]?.rows.get(it.id);
     const lines = D.lines.filter((l) => l.item_id === it.id).map((l) => ({ l, v: voucherOf(l) }))
-      .filter(({ v }) => v.date.slice(0, 7) >= from && v.date.slice(0, 7) <= to)
+      .filter(({ v }) => v.posted !== 0 && v.date.slice(0, 7) >= from && v.date.slice(0, 7) <= to)
       .sort((a, b) => cmp(a.v.date, b.v.date) || cmp(a.v.type, b.v.type) || a.v.id - b.v.id || a.l.sort - b.l.sort);
     let bq = first ? first.open_qty : 0, bv = first ? first.open_val : 0;
     const out = lines.map(({ l, v }) => {
@@ -735,7 +765,7 @@
       if (last) { let v = 0, cnt = 0; for (const r of last.rows.values()) { v += r.close_val; if (r.close_qty > 0) cnt++; } stock = { value: v, items_in_stock: cnt }; }
     }
     const tm = {};
-    for (const v of D.vouchers.filter((x) => x.date.startsWith(cur))) {
+    for (const v of D.vouchers.filter((x) => x.posted !== 0 && x.date.startsWith(cur))) {
       tm[v.type] = tm[v.type] || { type: v.type, c: 0, amt: 0 }; tm[v.type].c++;
       tm[v.type].amt += D.lines.filter((l) => l.voucher_id === v.id).reduce((s, l) => s + l.amount, 0);
     }
