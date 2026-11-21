@@ -107,22 +107,53 @@ CREATE TABLE IF NOT EXISTS periods (
 );
 `);
 
-// Danh mục khách hàng & nhà cung cấp (đối tượng)
-db.exec(`CREATE TABLE IF NOT EXISTS partners (
+// Danh mục khách hàng (kind = 'KH') và danh mục nhà cung cấp (kind = 'NCC'): hai danh mục độc lập,
+// mã chỉ cần không trùng trong cùng một danh mục.
+const PARTNERS_SQL = (name) => `CREATE TABLE ${name} (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  code TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  kind TEXT NOT NULL CHECK (kind IN ('KH','NCC')),
+  code TEXT NOT NULL COLLATE NOCASE,
   name TEXT NOT NULL,
-  is_customer INTEGER NOT NULL DEFAULT 0,
-  is_supplier INTEGER NOT NULL DEFAULT 0,
   tax_code TEXT,
-  address TEXT,
-  phone TEXT,
-  email TEXT,
-  contact TEXT,
-  note TEXT,
   created_at TEXT NOT NULL,
-  updated_at TEXT
-)`);
+  updated_at TEXT,
+  UNIQUE (kind, code)
+)`;
+const partnerCols = db.prepare('PRAGMA table_info(partners)').all().map((c) => c.name);
+if (!partnerCols.length) {
+  db.exec(PARTNERS_SQL('partners'));
+} else if (!partnerCols.includes('kind')) {
+  // Nâng cấp từ bản cũ (một danh mục chung có cờ is_customer / is_supplier):
+  // đối tượng vừa là KH vừa là NCC được tách thành 2 bản ghi, phiếu nhập trỏ sang bản ghi NCC mới.
+  db.exec('PRAGMA foreign_keys = OFF');
+  db.exec('BEGIN');
+  try {
+    db.exec(PARTNERS_SQL('partners_new'));
+    const ins = db.prepare('INSERT INTO partners_new(id, kind, code, name, tax_code, created_at, updated_at) VALUES (?,?,?,?,?,?,?)');
+    const insAuto = db.prepare('INSERT INTO partners_new(kind, code, name, tax_code, created_at, updated_at) VALUES (?,?,?,?,?,?)');
+    const old = db.prepare('SELECT * FROM partners').all();
+    // Bước 1: chép mọi bản ghi cũ, giữ nguyên id (KH nếu là khách hàng, ngược lại NCC)
+    for (const p of old) {
+      ins.run(p.id, p.is_customer ? 'KH' : 'NCC', p.code, p.name, p.tax_code, p.created_at, p.updated_at);
+      // Phiếu trỏ sai loại (không thể xảy ra với dữ liệu hợp lệ) thì bỏ liên kết
+      if (!p.is_supplier) db.prepare("UPDATE vouchers SET partner_id = NULL WHERE partner_id = ? AND type = 'N'").run(p.id);
+      if (!p.is_customer) db.prepare("UPDATE vouchers SET partner_id = NULL WHERE partner_id = ? AND type = 'X'").run(p.id);
+    }
+    // Bước 2: đối tượng vừa là KH vừa là NCC -> thêm bản ghi NCC (id mới), chuyển phiếu nhập sang bản ghi này
+    for (const p of old.filter((x) => x.is_customer && x.is_supplier)) {
+      const r = insAuto.run('NCC', p.code, p.name, p.tax_code, p.created_at, p.updated_at);
+      db.prepare("UPDATE vouchers SET partner_id = ? WHERE partner_id = ? AND type = 'N'").run(Number(r.lastInsertRowid), p.id);
+    }
+    db.exec('DROP TABLE partners');
+    db.exec('ALTER TABLE partners_new RENAME TO partners');
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON');
+  }
+}
 if (!db.prepare('PRAGMA table_info(vouchers)').all().some((c) => c.name === 'partner_id')) {
   db.exec('ALTER TABLE vouchers ADD COLUMN partner_id INTEGER REFERENCES partners(id)');
 }

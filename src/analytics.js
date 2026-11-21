@@ -1,7 +1,7 @@
 // Tính số liệu báo cáo theo đối tượng và dashboard phân tích.
 // Dùng chung cho máy chủ (Node) và bản demo trên trình duyệt: hàm thuần, nhận dữ liệu qua ctx.
 //   ctx.items    : [{ id, code, name, unit }]
-//   ctx.partners : [{ id, code, name, is_customer, is_supplier }]
+//   ctx.partners : [{ id, kind, code, name }]
 //   ctx.lines    : [{ id, item_id, qty, amount, v: { id, type, number, date, partner_id, partner } }]
 //   ctx.compute  : (toMonth) => kết quả tính giá BQGQ cuối kỳ (costing.compute)
 (function (root, factory) {

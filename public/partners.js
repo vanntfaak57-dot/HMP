@@ -1,19 +1,21 @@
 // Danh mục khách hàng & nhà cung cấp, báo cáo theo đối tượng, dashboard phân tích
 'use strict';
 
-const KIND_LABEL = { KH: 'Khách hàng', NCC: 'Nhà cung cấp' };
-const kindBadges = (p) => `${p.is_customer ? '<span class="badge kh">Khách hàng</span> ' : ''}${p.is_supplier ? '<span class="badge ncc">Nhà cung cấp</span>' : ''}`;
+const KIND_TITLE = { KH: 'Danh mục khách hàng', NCC: 'Danh mục nhà cung cấp' };
+const KIND_OBJ = { KH: 'khách hàng', NCC: 'nhà cung cấp' };
 const monthLabel = (m) => (m ? m.split('-').reverse().join('/') : '');
 
-// ---------- Danh mục đối tượng ----------
-async function pagePartners() {
-  const partners = await api('/api/partners');
+// ---------- Danh mục khách hàng / nhà cung cấp (Mã, Tên, MST) ----------
+async function pagePartners(kind) {
+  const partners = await api('/api/partners?kind=' + kind);
   const W = canWrite();
+  const OBJ = KIND_OBJ[kind];
+  const VT = kind === 'KH' ? 'X' : 'N';
   const selected = new Set();
-  let filter = '', kind = sessionStorage.getItem('pkind') || '';
+  let filter = '';
   let list = [];
   const updateSelection = () => {
-    const visible = new Set(list.map((p) => p.id));
+    const visible = new Set(list.map((x) => x.id));
     for (const id of [...selected]) if (!visible.has(id)) selected.delete(id);
     $$('#p-body tr[data-id]').forEach((tr) => {
       const on = selected.has(Number(tr.dataset.id));
@@ -25,108 +27,93 @@ async function pagePartners() {
     const bar = $('#p-bulk');
     if (bar) { bar.hidden = selected.size === 0; $('#p-bulk-count').textContent = selected.size.toLocaleString('vi-VN'); }
   };
+  const cols = W ? 6 : 5;
   const render = () => {
     const f = filter.toLowerCase();
-    list = partners.filter((p) => (!kind || (kind === 'KH' ? p.is_customer : p.is_supplier))
-      && (!f || [p.code, p.name, p.tax_code, p.phone, p.contact].some((x) => String(x || '').toLowerCase().includes(f))));
-    $('#p-body').innerHTML = list.map((p) => `<tr data-id="${p.id}">
-      ${W ? `<td class="chk-col"><label class="chk"><input type="checkbox" data-sel="${p.id}" aria-label="Chọn ${esc(p.code)}"></label></td>` : ''}
-      <td>${esc(p.code)}</td><td>${esc(p.name)}</td><td>${kindBadges(p)}</td><td>${esc(p.tax_code)}</td>
-      <td>${esc(p.address)}</td><td>${esc(p.phone)}</td><td>${esc(p.contact)}</td>
-      <td class="num">${p.voucher_count ? `<a href="#/vouchers/${p.is_customer && !p.is_supplier ? 'X' : p.is_supplier && !p.is_customer ? 'N' : 'X'}" data-pv="${p.id}">${p.voucher_count}</a>` : '0'}</td>
-      <td style="white-space:nowrap">${W ? `<button class="btn small" data-pedit="${p.id}">Sửa</button>` : ''}</td></tr>`).join('')
-      || `<tr><td colspan="${W ? 10 : 9}" class="muted">Chưa có đối tượng. ${W ? 'Bấm "+ Thêm đối tượng" hoặc nhập từ Excel.' : ''}</td></tr>`;
-    $('#p-foot').innerHTML = `<tr><td colspan="${W ? 10 : 9}">Tổng cộng: ${list.length} đối tượng (${list.filter((p) => p.is_customer).length} khách hàng, ${list.filter((p) => p.is_supplier).length} nhà cung cấp)</td></tr>`;
+    list = partners.filter((x) => !f || [x.code, x.name, x.tax_code].some((v) => String(v || '').toLowerCase().includes(f)));
+    $('#p-body').innerHTML = list.map((x) => `<tr data-id="${x.id}">
+      ${W ? `<td class="chk-col"><label class="chk"><input type="checkbox" data-sel="${x.id}" aria-label="Chọn ${esc(x.code)}"></label></td>` : ''}
+      <td>${esc(x.code)}</td><td>${esc(x.name)}</td><td>${esc(x.tax_code)}</td>
+      <td class="num">${x.voucher_count ? `<a href="#/vouchers/${VT}" data-pv="${x.id}">${x.voucher_count}</a>` : '0'}</td>
+      ${W ? `<td><button class="btn small" data-pedit="${x.id}">Sửa</button></td>` : ''}</tr>`).join('')
+      || `<tr><td colspan="${cols}" class="muted">Chưa có ${OBJ}. ${W ? `Bấm "+ Thêm ${OBJ}" hoặc nhập từ Excel.` : ''}</td></tr>`;
+    $('#p-foot').innerHTML = `<tr><td colspan="${cols}">Tổng cộng: ${list.length.toLocaleString('vi-VN')} ${OBJ}</td></tr>`;
     updateSelection();
   };
   $('#main').innerHTML = `
-    <h1>Khách hàng &amp; nhà cung cấp</h1>
+    <h1>${KIND_TITLE[kind]}</h1>
     <div class="toolbar">
-      <input id="p-filter" placeholder="Tìm mã, tên, MST, điện thoại…" style="width:260px">
-      <select id="p-kind"><option value="">Tất cả đối tượng</option><option value="KH">Khách hàng</option><option value="NCC">Nhà cung cấp</option></select>
+      <input id="p-filter" placeholder="Tìm mã, tên, mã số thuế…" style="width:260px">
       ${W ? `<span id="p-bulk" class="bulk-bar" hidden>Đã chọn <b id="p-bulk-count">0</b>
-        <button class="btn danger" id="p-bulk-del" type="button">Xóa các đối tượng đã chọn</button>
+        <button class="btn danger" id="p-bulk-del" type="button">Xóa các dòng đã chọn</button>
         <button class="btn" id="p-bulk-clear" type="button">Bỏ chọn</button></span>` : ''}
       <span class="spacer"></span>
-      ${W ? `<button class="btn primary" id="p-add">+ Thêm đối tượng</button>
-      <a class="btn" href="/api/partners/template.xlsx">Tải file Excel mẫu</a>
+      ${W ? `<button class="btn primary" id="p-add">+ Thêm ${OBJ}</button>
+      <a class="btn" href="/api/partners/template.xlsx?kind=${kind}">Tải file Excel mẫu</a>
       <label class="btn">Nhập từ Excel<input type="file" id="p-import" accept=".xlsx" hidden></label>` : ''}
     </div>
     <div class="table-wrap sticky-head"><table><thead><tr>
       ${W ? '<th class="chk-col"><label class="chk"><input type="checkbox" id="p-all" aria-label="Chọn tất cả" title="Chọn tất cả"></label></th>' : ''}
-      <th>Mã</th><th>Tên đối tượng</th><th>Loại</th><th>Mã số thuế</th><th>Địa chỉ</th><th>Điện thoại</th><th>Người liên hệ</th><th class="num">Số chứng từ</th><th></th></tr></thead>
+      <th>Mã ${OBJ}</th><th>Tên ${OBJ}</th><th>Mã số thuế</th><th class="num">Số chứng từ</th>${W ? '<th></th>' : ''}</tr></thead>
       <tbody id="p-body"></tbody><tfoot id="p-foot"></tfoot></table></div>`;
-  $('#p-kind').value = kind;
   render();
   $('#p-filter').addEventListener('input', (e) => { filter = e.target.value; render(); });
-  $('#p-kind').addEventListener('change', (e) => { kind = e.target.value; sessionStorage.setItem('pkind', kind); render(); });
   $('#p-body').addEventListener('change', (e) => {
     const cb = e.target.closest('[data-sel]'); if (!cb) return;
     if (cb.checked) selected.add(Number(cb.dataset.sel)); else selected.delete(Number(cb.dataset.sel));
     updateSelection();
   });
-  $('#p-all')?.addEventListener('change', (e) => { if (e.target.checked) list.forEach((p) => selected.add(p.id)); else selected.clear(); updateSelection(); });
+  $('#p-all')?.addEventListener('change', (e) => { if (e.target.checked) list.forEach((x) => selected.add(x.id)); else selected.clear(); updateSelection(); });
   $('#p-bulk-clear')?.addEventListener('click', () => { selected.clear(); updateSelection(); });
   $('#p-bulk-del')?.addEventListener('click', async () => {
-    const chosen = partners.filter((p) => selected.has(p.id));
-    const preview = chosen.slice(0, 8).map((p) => p.code).join(', ') + (chosen.length > 8 ? ` và ${chosen.length - 8} đối tượng khác` : '');
-    if (!confirm(`Xóa ${chosen.length} đối tượng: ${preview}? Đối tượng đã có chứng từ sẽ được giữ lại.`)) return;
+    const chosen = partners.filter((x) => selected.has(x.id));
+    const preview = chosen.slice(0, 8).map((x) => x.code).join(', ') + (chosen.length > 8 ? ` và ${chosen.length - 8} mã khác` : '');
+    if (!confirm(`Xóa ${chosen.length} ${OBJ}: ${preview}? Dòng đã có chứng từ sẽ được giữ lại.`)) return;
     try {
-      const r = await api('/api/partners/bulk-delete', { method: 'POST', body: { ids: chosen.map((p) => p.id) } });
-      toast(`Đã xóa ${r.deleted.length} đối tượng${r.skipped.length ? `, giữ lại ${r.skipped.length}` : ''}`);
+      const r = await api('/api/partners/bulk-delete', { method: 'POST', body: { ids: chosen.map((x) => x.id) } });
+      toast(`Đã xóa ${r.deleted.length} ${OBJ}${r.skipped.length ? `, giữ lại ${r.skipped.length}` : ''}`);
       await route();
       if (r.skipped.length) {
-        modal(`<h2>Không xóa được ${r.skipped.length} đối tượng</h2><div class="table-wrap"><table><thead><tr><th>Mã</th><th>Tên</th><th>Lý do</th></tr></thead><tbody>
-          ${r.skipped.map((s) => `<tr><td>${esc(s.code)}</td><td>${esc(s.name || '')}</td><td>${esc(s.reason)}</td></tr>`).join('')}</tbody></table></div>
+        modal(`<h2>Không xóa được ${r.skipped.length} ${OBJ}</h2><div class="table-wrap"><table><thead><tr><th>Mã</th><th>Tên</th><th>Lý do</th></tr></thead><tbody>
+          ${r.skipped.map((x) => `<tr><td>${esc(x.code)}</td><td>${esc(x.name || '')}</td><td>${esc(x.reason)}</td></tr>`).join('')}</tbody></table></div>
           <div class="actions"><button class="btn primary" data-close>Đóng</button></div>`);
       }
     } catch (err) { toast(err.message, true); }
   });
   $('#main').addEventListener('click', (e) => {
     const ed = e.target.closest('[data-pedit]');
-    if (ed) partnerDialog(partners.find((p) => p.id == ed.dataset.pedit));
+    if (ed) partnerDialog(kind, partners.find((x) => x.id == ed.dataset.pedit));
     const pv = e.target.closest('[data-pv]');
-    if (pv) {
-      const p = partners.find((x) => x.id == pv.dataset.pv);
-      const t = pv.getAttribute('href').slice(-1);
-      sessionStorage.setItem('vfilter' + t, JSON.stringify({ from: '2000-01-01', to: '2999-12-31', q: '', partner_id: String(p.id) }));
-    }
+    if (pv) sessionStorage.setItem('vfilter' + VT, JSON.stringify({ from: '2000-01-01', to: '2999-12-31', q: '', partner_id: String(pv.dataset.pv) }));
   });
-  $('#p-add')?.addEventListener('click', () => partnerDialog(null));
+  $('#p-add')?.addEventListener('click', () => partnerDialog(kind, null));
   $('#p-import')?.addEventListener('change', async (e) => {
     const fd = new FormData(); fd.append('file', e.target.files[0]);
-    try { const r = await api('/api/partners/import', { method: 'POST', body: fd }); toast(`Đã thêm ${r.created}, cập nhật ${r.updated} đối tượng`); route(); }
+    try { const r = await api('/api/partners/import?kind=' + kind, { method: 'POST', body: fd }); toast(`Đã thêm ${r.created}, cập nhật ${r.updated} ${OBJ}`); route(); }
     catch (err) { toast(err.message, true); }
     e.target.value = '';
   });
 }
 
-// Hộp thoại thêm/sửa đối tượng. defaults dùng khi tạo nhanh từ phiếu.
-function partnerDialog(p, onSaved, defaults = {}) {
-  const v = p || { is_customer: defaults.kind !== 'NCC' ? 1 : 0, is_supplier: defaults.kind === 'NCC' ? 1 : 0, ...defaults };
-  modal(`<h2>${p ? 'Sửa đối tượng' : 'Thêm đối tượng'}</h2>
-    <form class="form-grid" id="partner-form" autocomplete="off">
-      <label>Mã đối tượng *<input name="code" id="pf-code" required value="${esc(v.code)}"></label>
-      <label>Mã số thuế<input name="tax_code" id="pf-tax" value="${esc(v.tax_code)}"></label>
-      <label class="wide">Tên đối tượng *<input name="name" id="pf-name" required value="${esc(v.name)}"></label>
-      <div class="wide kind-row">Loại:
-        <label class="inline"><input type="checkbox" name="is_customer" id="pf-kh" ${v.is_customer ? 'checked' : ''}> Khách hàng</label>
-        <label class="inline"><input type="checkbox" name="is_supplier" id="pf-ncc" ${v.is_supplier ? 'checked' : ''}> Nhà cung cấp</label></div>
-      <label class="wide">Địa chỉ<input name="address" id="pf-addr" value="${esc(v.address)}"></label>
-      <label>Điện thoại<input name="phone" id="pf-phone" value="${esc(v.phone)}"></label>
-      <label>Email<input name="email" id="pf-email" type="email" value="${esc(v.email)}"></label>
-      <label>Người liên hệ<input name="contact" id="pf-contact" value="${esc(v.contact)}"></label>
-      <label>Ghi chú<input name="note" id="pf-note" value="${esc(v.note)}"></label>
+// Hộp thoại thêm/sửa khách hàng hoặc nhà cung cấp. defaults dùng khi tạo nhanh từ phiếu.
+function partnerDialog(kind, p, onSaved, defaults = {}) {
+  const OBJ = KIND_OBJ[kind];
+  const v = p || defaults;
+  modal(`<h2>${p ? 'Sửa' : 'Thêm'} ${OBJ}</h2>
+    <form class="form-grid" id="partner-form" autocomplete="off" style="grid-template-columns:1fr">
+      <label>Mã ${OBJ} *<input name="code" id="pf-code" required value="${esc(v.code)}"></label>
+      <label>Tên ${OBJ} *<input name="name" id="pf-name" required value="${esc(v.name)}"></label>
+      <label>Mã số thuế<input name="tax_code" id="pf-tax" inputmode="numeric" value="${esc(v.tax_code)}"></label>
     </form>
     <div class="actions"><button class="btn" data-close>Hủy</button><button class="btn primary" id="partner-save">Lưu</button></div>`, (bg, close) => {
-    if (!v.code) $('#pf-code', bg).focus();
+    $(v.code ? '#pf-name' : '#pf-code', bg).focus();
+    $('#partner-form', bg).addEventListener('submit', (e) => { e.preventDefault(); $('#partner-save', bg).click(); });
     $('#partner-save', bg).addEventListener('click', async () => {
-      const body = Object.fromEntries(new FormData($('#partner-form', bg)));
-      body.is_customer = $('#pf-kh', bg).checked; body.is_supplier = $('#pf-ncc', bg).checked;
+      const body = { ...Object.fromEntries(new FormData($('#partner-form', bg))), kind };
       try {
         const r = await api(p ? `/api/partners/${p.id}` : '/api/partners', { method: p ? 'PUT' : 'POST', body });
-        close(); toast('Đã lưu đối tượng ' + body.code);
-        if (onSaved) onSaved({ ...body, id: p?.id || r.id, is_customer: body.is_customer ? 1 : 0, is_supplier: body.is_supplier ? 1 : 0 }); else route();
+        close(); toast(`Đã lưu ${OBJ} ${body.code}`);
+        if (onSaved) onSaved({ ...body, id: p?.id || r.id }); else route();
       } catch (err) { toast(err.message, true); }
     });
   });

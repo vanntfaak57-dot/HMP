@@ -14,7 +14,7 @@ const ACTIONS = {
   ITEM_CREATE: 'Thêm mã hàng', ITEM_UPDATE: 'Sửa mã hàng', ITEM_DELETE: 'Xóa mã hàng', ITEM_BULK_DELETE: 'Xóa hàng loạt mã hàng', ITEM_IMPORT: 'Nhập Excel danh mục',
   VOUCHER_CREATE: 'Thêm chứng từ', VOUCHER_UPDATE: 'Sửa chứng từ', VOUCHER_DELETE: 'Xóa chứng từ', PDF_UPLOAD: 'Tải PDF',
   COSTING_RUN: 'Tính giá xuất kho', PERIOD_LOCK: 'Khóa sổ', PERIOD_UNLOCK: 'Mở khóa sổ', USER_CREATE: 'Thêm người dùng',
-  USER_UPDATE: 'Sửa người dùng', PARTNER_CREATE: 'Thêm đối tượng', PARTNER_UPDATE: 'Sửa đối tượng', PARTNER_DELETE: 'Xóa đối tượng', PARTNER_IMPORT: 'Nhập Excel đối tượng', SETTINGS_UPDATE: 'Sửa cài đặt', EXPORT: 'Xuất báo cáo',
+  USER_UPDATE: 'Sửa người dùng', PARTNER_CREATE: 'Thêm KH/NCC', PARTNER_UPDATE: 'Sửa KH/NCC', PARTNER_DELETE: 'Xóa KH/NCC', PARTNER_IMPORT: 'Nhập Excel KH/NCC', SETTINGS_UPDATE: 'Sửa cài đặt', EXPORT: 'Xuất báo cáo',
 };
 
 const VAT_OPTIONS = [['', '-- Chưa chọn --'], ['0', '0%'], ['5', '5%'], ['8', '8%'], ['10', '10%'], ['KCT', 'KCT – Không chịu thuế'], ['KKKNT', 'KKKNT – Không kê khai, tính nộp thuế']];
@@ -94,7 +94,8 @@ async function boot() {
 const routes = [
   [/^#\/dashboard$/, pageDashboard],
   [/^#\/items$/, pageItems],
-  [/^#\/partners$/, pagePartners],
+  [/^#\/customers$/, () => pagePartners('KH')],
+  [/^#\/suppliers$/, () => pagePartners('NCC')],
   [/^#\/analytics$/, pageAnalytics],
   [/^#\/report-partners$/, pageReportPartners],
   [/^#\/vouchers\/(N|X)$/, (m) => pageVouchers(m[1])],
@@ -336,9 +337,9 @@ async function pageVoucherForm(type, id) {
   const X = type === 'X';
   const KIND = X ? 'KH' : 'NCC';
   const OBJ = X ? 'khách hàng' : 'nhà cung cấp';
-  let allPartners = await api('/api/partners');
+  let allPartners = await api('/api/partners?kind=' + KIND);
   let partnerId = v.partner_id || null;
-  const kindPartners = () => allPartners.filter((p) => (X ? p.is_customer : p.is_supplier));
+  const kindPartners = () => allPartners;
   const pickLabel = (p) => `${p.code} - ${p.name}`;
   const curPartner = allPartners.find((p) => p.id === partnerId);
 
@@ -387,7 +388,6 @@ async function pageVoucherForm(type, id) {
     $('#v-partner-pick').value = p ? pickLabel(p) : '';
     if (p) {
       $('#v-head [name=partner]').value = p.name;
-      if (p.address) $('#v-head [name=address]').value = p.address;
       $('#partner-hint').innerHTML = '';
     }
   }
@@ -398,7 +398,7 @@ async function pageVoucherForm(type, id) {
     return KIND + String(max + 1).padStart(3, '0');
   }
   function newPartner(defaults = {}) {
-    partnerDialog(null, (p) => { allPartners.push(p); refreshPartnerList(); setPartner(p); }, { kind: KIND, code: nextPartnerCode(), ...defaults });
+    partnerDialog(KIND, null, (p) => { allPartners.push(p); refreshPartnerList(); setPartner(p); }, { code: nextPartnerCode(), ...defaults });
   }
   $('#v-partner-pick').addEventListener('change', (e) => {
     const val = e.target.value.trim();
@@ -408,7 +408,7 @@ async function pageVoucherForm(type, id) {
     if (p) setPartner(p);
     else { partnerId = null; toast(`"${val}" chưa có trong danh mục ${OBJ}. Bấm "+ Mới" để thêm.`, true); }
   });
-  $('#v-partner-new')?.addEventListener('click', () => newPartner({ name: $('#v-head [name=partner]').value, address: $('#v-head [name=address]').value }));
+  $('#v-partner-new')?.addEventListener('click', () => newPartner({ name: $('#v-head [name=partner]').value }));
   $('#partner-hint').addEventListener('click', (e) => {
     const b = e.target.closest('[data-newpartner]'); if (!b) return;
     newPartner(JSON.parse(b.dataset.newpartner));
@@ -524,9 +524,8 @@ async function pageVoucherForm(type, id) {
         if (pm) { setPartner(pm); if (p.partner) head.querySelector('[name=partner]').value = p.partner; }
         else {
           partnerId = null; $('#v-partner-pick').value = '';
-          if (p.partner_id) $('#partner-hint').innerHTML = `<div class="alert">Đối tượng <b>${esc(p.partner_code)}</b> có trong danh mục nhưng chưa được đánh dấu là ${OBJ}. Sửa loại đối tượng trong danh mục rồi chọn lại.</div>`;
-          else if (p.partner) $('#partner-hint').innerHTML = `<div class="alert">${X ? 'Khách hàng' : 'Nhà cung cấp'} <b>${esc(p.partner)}</b>${p.tax_code ? ` (MST ${esc(p.tax_code)})` : ''} chưa có trong danh mục.
-            ${canWrite() ? `<button type="button" class="btn small" data-newpartner="${esc(JSON.stringify({ name: p.partner, tax_code: p.tax_code || '', address: p.address || '' }))}">+ Thêm vào danh mục ${OBJ}</button>` : ''}</div>`;
+          if (p.partner) $('#partner-hint').innerHTML = `<div class="alert">${X ? 'Khách hàng' : 'Nhà cung cấp'} <b>${esc(p.partner)}</b>${p.tax_code ? ` (MST ${esc(p.tax_code)})` : ''} chưa có trong danh mục.
+            ${canWrite() ? `<button type="button" class="btn small" data-newpartner="${esc(JSON.stringify({ name: p.partner, tax_code: p.tax_code || '' }))}">+ Thêm vào danh mục ${OBJ}</button>` : ''}</div>`;
         }
         items = await api(`/api/items?date=${head.querySelector('[name=date]').value}&exclude=${id || 0}`);
         lines = p.lines.map((l) => ({ item_id: l.item_id, qty: l.qty, unit_price: l.unit_price, amount: l.amount }));

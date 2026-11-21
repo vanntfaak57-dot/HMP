@@ -53,18 +53,21 @@ const step = (s) => console.log('✔', s);
 
     // Đọc PDF phiếu xuất
     // Danh mục đối tượng
-    const KH = await ok('/api/partners', { method: 'POST', body: { code: 'KH001', name: 'Công ty CP Xây dựng Minh Phát', is_customer: true, tax_code: '0101234567' } });
-    const NCC = await ok('/api/partners', { method: 'POST', body: { code: 'NCC001', name: 'Công ty Xi măng Hà Tiên', is_supplier: true } });
+    const KH = await ok('/api/partners', { method: 'POST', body: { kind: 'KH', code: 'KH001', name: 'Công ty CP Xây dựng Minh Phát', tax_code: '0101234567' } });
+    const NCC = await ok('/api/partners', { method: 'POST', body: { kind: 'NCC', code: 'NCC001', name: 'Công ty Xi măng Hà Tiên' } });
     assert.equal((await api('/api/partners', { method: 'POST', body: { code: 'X1', name: 'Không loại' } })).status, 400);
+    assert.equal((await api('/api/partners', { method: 'POST', body: { kind: 'KH', code: 'kh001', name: 'Trùng mã' } })).status, 400);
+    await ok('/api/partners', { method: 'POST', body: { kind: 'NCC', code: 'KH001', name: 'Minh Phát (bán vật tư cho ta)' } }); // cùng mã ở danh mục khác: hợp lệ
+    assert.equal((await ok('/api/partners?kind=KH')).length, 1); assert.equal((await ok('/api/partners?kind=NCC')).length, 2);
     const wrong = await api('/api/vouchers', { method: 'POST', body: { type: 'X', date: '2026-10-06', partner_id: NCC.id, lines: [{ item_id: A.id, qty: 1, unit_price: 1 }] } });
     assert.equal(wrong.status, 400); assert.match(wrong.d.error, /không phải khách hàng/);
-    step('Danh mục khách hàng/NCC; chặn chọn NCC trên phiếu xuất');
+    step('Hai danh mục KH và NCC độc lập (Mã/Tên/MST); chặn chọn NCC trên phiếu xuất');
 
     const pdfPath = path.join(dir, 'px.pdf');
     execFileSync(process.execPath, [path.join(__dirname, 'make-pdf.js'), pdfPath]);
     const fd = new FormData(); fd.append('file', new Blob([fs.readFileSync(pdfPath)], { type: 'application/pdf' }), 'phieu_xuat.pdf');
     const p = await ok('/api/pdf/parse?type=X', { method: 'POST', body: fd });
-    assert.equal(p.partner_id, KH.id); assert.equal(p.partner_ok, true);
+    assert.equal(p.partner_id, KH.id);
     assert.equal(p.type, 'X'); assert.equal(p.number, 'XK-PDF-0015'); assert.equal(p.date, '2026-10-15');
     assert.match(p.partner, /Minh Phát/);
     assert.equal(p.lines.length, 2);

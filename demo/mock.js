@@ -2,7 +2,7 @@
 // Logic nghiệp vụ được chuyển nguyên từ server.js / src/*.js; dữ liệu lưu trong localStorage của trình duyệt.
 'use strict';
 (function () {
-  const DB_KEY = 'kho-demo-v3';
+  const DB_KEY = 'kho-demo-v4';
   const SID_KEY = 'kho-demo-sid';
   const EPS = 1e-9;
   let D = null;
@@ -52,20 +52,20 @@
     ];
     for (const [code, name, unit, q, v, vat] of items) D.items.push({ id: nextId('items'), code, name, unit, vat_rate: vat, opening_qty: q, opening_value: v, note: '', created_at: '2026-09-30 08:00:00' });
     const PARTNERS = [
-      ['KH001', 'Công ty CP Xây dựng Đại Việt', 1, 0, '0105556677', '18 Trần Duy Hưng, Cầu Giấy, Hà Nội', '0243 556 677', 'Chị Lan'],
-      ['KH002', 'Công ty TNHH Nhà Xanh', 1, 0, '0108889990', '45 Lê Văn Lương, Thanh Xuân, Hà Nội', '0912 888 999', 'Anh Hùng'],
-      ['KH003', 'Anh Trần Văn Nam', 1, 0, '', 'Xã Kim Chung, Đông Anh, Hà Nội', '0987 123 456', ''],
-      ['KH004', 'Công ty CP Xây dựng Minh Phát', 1, 0, '0101234567', '12 Láng Hạ, Đống Đa, Hà Nội', '0243 123 456', 'Anh Tuấn'],
-      ['NCC001', 'Công ty Xi măng Hà Tiên', 0, 1, '0300000001', 'Thủ Đức, TP. Hồ Chí Minh', '028 3896 1234', 'Phòng kinh doanh'],
-      ['NCC002', 'Công ty Thép Hòa Phát', 0, 1, '0900189284', 'KCN Phố Nối A, Hưng Yên', '0221 394 2884', ''],
-      ['NCC003', 'HTX Cát sỏi Sông Hồng', 0, 1, '', 'Bến Chương Dương, Hoàn Kiếm, Hà Nội', '0904 222 333', 'Bác Thành'],
+      ['KH', 'KH001', 'Công ty CP Xây dựng Đại Việt', '0105556677'],
+      ['KH', 'KH002', 'Công ty TNHH Nhà Xanh', '0108889990'],
+      ['KH', 'KH003', 'Anh Trần Văn Nam', ''],
+      ['KH', 'KH004', 'Công ty CP Xây dựng Minh Phát', '0101234567'],
+      ['NCC', 'NCC001', 'Công ty Xi măng Hà Tiên', '0300000001'],
+      ['NCC', 'NCC002', 'Công ty Thép Hòa Phát', '0900189284'],
+      ['NCC', 'NCC003', 'HTX Cát sỏi Sông Hồng', ''],
     ];
-    for (const [code, name, kh, ncc, tax, address, phone, contact] of PARTNERS) D.partners.push({ id: nextId('partners'), code, name, is_customer: kh, is_supplier: ncc, tax_code: tax, address, phone, email: '', contact, note: '', created_at: '2026-09-30 08:00:00' });
+    for (const [kind, code, name, tax] of PARTNERS) D.partners.push({ id: nextId('partners'), kind, code, name, tax_code: tax, created_at: '2026-09-30 08:00:00' });
     const pid = (name) => D.partners.find((p) => p.name === name)?.id || null;
     const id = (c) => D.items.find((i) => i.code === c).id;
     const V = (type, number, date, partner, description, lines) => {
       const vid = nextId('vouchers');
-      D.vouchers.push({ id: vid, type, number, date, partner_id: pid(partner), partner, address: D.partners.find((p) => p.name === partner)?.address || '', description, ref_no: '', source: 'manual', attachment: null, created_by: 'ketoan', created_at: date + ' 09:00:00' });
+      D.vouchers.push({ id: vid, type, number, date, partner_id: pid(partner), partner, address: '', description, ref_no: '', source: 'manual', attachment: null, created_by: 'ketoan', created_at: date + ' 09:00:00' });
       lines.forEach(([c, qty, price], i) => D.lines.push({ id: nextId('lines'), voucher_id: vid, item_id: id(c), qty, unit_price: price, amount: Math.round(qty * price), cost_price: null, cost_amount: null, sort: i }));
     };
     V('N', 'NK00001', '2026-10-05', 'Công ty Xi măng Hà Tiên', 'Nhập kho mua hàng', [['VT001', 50, 88000]]);
@@ -331,8 +331,8 @@
     if (b.partner_id) {
       const p = D.partners.find((x) => x.id === Number(b.partner_id));
       if (!p) throw fail('Đối tượng không tồn tại trong danh mục');
-      if (type === 'X' && !p.is_customer) throw fail(`${p.code} - ${p.name} không phải khách hàng. Sửa loại đối tượng trong danh mục hoặc chọn đối tượng khác.`);
-      if (type === 'N' && !p.is_supplier) throw fail(`${p.code} - ${p.name} không phải nhà cung cấp. Sửa loại đối tượng trong danh mục hoặc chọn đối tượng khác.`);
+      if (type === 'X' && p.kind !== 'KH') throw fail(`${p.code} - ${p.name} thuộc danh mục nhà cung cấp, không phải khách hàng`);
+      if (type === 'N' && p.kind !== 'NCC') throw fail(`${p.code} - ${p.name} thuộc danh mục khách hàng, không phải nhà cung cấp`);
       partner_id = p.id; if (!partnerName) partnerName = p.name;
     }
     const lines = (b.lines || []).filter((l) => l && l.item_id);
@@ -494,65 +494,61 @@
     return { created, updated };
   });
 
-  // ---- Khách hàng & nhà cung cấp
-  const truthy = (v) => v === true || v === 1 || v === '1' || v === 'on';
+  // ---- Danh mục khách hàng & danh mục nhà cung cấp (Mã, Tên, MST)
+  const KIND_NAME = { KH: 'khách hàng', NCC: 'nhà cung cấp' };
+  const needKind = (k) => { if (k !== 'KH' && k !== 'NCC') throw fail('Thiếu loại danh mục (KH hoặc NCC)'); return k; };
   function cleanPartner(b) {
-    const code = String(b.code || '').trim(), name = String(b.name || '').trim();
-    if (!code || !name) throw fail('Mã và tên đối tượng là bắt buộc');
-    const is_customer = truthy(b.is_customer) ? 1 : 0, is_supplier = truthy(b.is_supplier) ? 1 : 0;
-    if (!is_customer && !is_supplier) throw fail(`Đối tượng ${code}: chọn ít nhất một loại (Khách hàng hoặc Nhà cung cấp)`);
-    const s = (k, n = 300) => String(b[k] ?? '').trim().slice(0, n);
-    return { code, name, is_customer, is_supplier, tax_code: s('tax_code', 20), address: s('address'), phone: s('phone', 50), email: s('email', 100), contact: s('contact', 100), note: s('note') };
+    const code = String(b.code ?? '').trim().slice(0, 50), name = String(b.name ?? '').trim().slice(0, 300);
+    if (!code || !name) throw fail('Mã và tên là bắt buộc');
+    return { code, name, tax_code: String(b.tax_code ?? '').trim().slice(0, 20) };
   }
-  function parseKind(t) {
-    const s = String(t || '').toUpperCase().normalize('NFC'); const both = /CẢ|CA HAI|BOTH/.test(s);
-    return { is_customer: both || /KH|KHÁCH/.test(s) ? 1 : 0, is_supplier: both || /NCC|CUNG CẤP|CUNG CAP/.test(s) ? 1 : 0 };
-  }
-  R('GET', '/api/partners', ({ query }) => D.partners.filter((p) => (query.kind !== 'KH' || p.is_customer) && (query.kind !== 'NCC' || p.is_supplier))
+  R('GET', '/api/partners', ({ query }) => D.partners.filter((p) => !(query.kind === 'KH' || query.kind === 'NCC') || p.kind === query.kind)
     .sort((a, b) => cmp(a.code, b.code)).map((p) => ({ ...p, voucher_count: D.vouchers.filter((v) => v.partner_id === p.id).length })));
   R('POST', '/api/partners', ({ user, body }) => { W(user);
-    const p = cleanPartner(body);
-    if (D.partners.some((x) => ci(x.code, p.code))) throw fail(`Mã đối tượng ${p.code} đã tồn tại`);
-    const id = tx(() => { const id = nextId('partners'); D.partners.push({ id, ...p, created_at: now() }); return id; });
-    audit(user, 'PARTNER_CREATE', `${p.code} - ${p.name}`); return { id };
+    const kind = needKind(body.kind); const p = cleanPartner(body);
+    if (D.partners.some((x) => x.kind === kind && ci(x.code, p.code))) throw fail(`Mã ${p.code} đã có trong danh mục ${KIND_NAME[kind]}`);
+    const id = tx(() => { const id = nextId('partners'); D.partners.push({ id, kind, ...p, created_at: now() }); return id; });
+    audit(user, 'PARTNER_CREATE', `Danh mục ${KIND_NAME[kind]}: ${p.code} - ${p.name}${p.tax_code ? ', MST ' + p.tax_code : ''}`); return { id };
   });
   R('PUT', '/api/partners/:id', ({ user, params, body }) => { W(user);
-    const old = D.partners.find((x) => x.id === Number(params.id)); if (!old) throw fail('Không tìm thấy đối tượng', 404);
+    const old = D.partners.find((x) => x.id === Number(params.id)); if (!old) throw fail('Không tìm thấy', 404);
     const p = cleanPartner(body);
-    if (D.partners.some((x) => x.id !== old.id && ci(x.code, p.code))) throw fail(`Mã đối tượng ${p.code} đã tồn tại`);
+    if (D.partners.some((x) => x.id !== old.id && x.kind === old.kind && ci(x.code, p.code))) throw fail(`Mã ${p.code} đã có trong danh mục ${KIND_NAME[old.kind]}`);
+    const before = { ...old };
     tx(() => Object.assign(old, p, { updated_at: now() }));
-    audit(user, 'PARTNER_UPDATE', `${p.code}: ${JSON.stringify(p)}`); return { ok: true };
+    audit(user, 'PARTNER_UPDATE', `Danh mục ${KIND_NAME[old.kind]}: ${before.code} → ${p.code} - ${p.name}${p.tax_code ? ', MST ' + p.tax_code : ''} (cũ: ${before.name}${before.tax_code ? ', MST ' + before.tax_code : ''})`); return { ok: true };
   });
   R('POST', '/api/partners/bulk-delete', ({ user, body }) => { W(user);
     const ids = [...new Set((body.ids || []).map(Number).filter(Number.isInteger))];
-    if (!ids.length) throw fail('Chưa chọn đối tượng nào');
-    const deleted = [], skipped = [];
+    if (!ids.length) throw fail('Chưa chọn dòng nào');
+    const deleted = [], skipped = []; let kind = null;
     tx(() => { for (const id of ids) {
       const p = D.partners.find((x) => x.id === id);
       if (!p) { skipped.push({ code: `#${id}`, reason: 'Không còn tồn tại' }); continue; }
+      kind = p.kind;
       const n = D.vouchers.filter((v) => v.partner_id === id).length;
       if (n) { skipped.push({ code: p.code, name: p.name, reason: `Đã có ${n} chứng từ` }); continue; }
       D.partners = D.partners.filter((x) => x !== p); deleted.push(p.code);
     } });
-    audit(user, 'PARTNER_DELETE', `Xóa ${deleted.length} đối tượng: ${deleted.join(', ') || '(không có)'}${skipped.length ? ` | bỏ qua: ${skipped.map((s) => `${s.code} (${s.reason})`).join(', ')}` : ''}`);
+    audit(user, 'PARTNER_DELETE', `Danh mục ${KIND_NAME[kind] || ''}: xóa ${deleted.length}: ${deleted.join(', ') || '(không có)'}${skipped.length ? ` | bỏ qua: ${skipped.map((x) => `${x.code} (${x.reason})`).join(', ')}` : ''}`);
     return { deleted, skipped };
   });
-  R('POST', '/api/partners/import', async ({ user, body }) => { W(user);
+  R('POST', '/api/partners/import', async ({ user, body, query }) => { W(user);
+    const kind = needKind(query.kind);
     const f = body.get('file'); if (!f) throw fail('Chưa chọn file');
     const wb = window.XLSX.read(await f.arrayBuffer(), { type: 'array' });
-    const data = window.XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+    const data = window.XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '', raw: false });
     const rows = [];
     data.forEach((r, i) => { if (i === 0 || !String(r[0] ?? '').trim()) return;
-      const c = Array.from({ length: 9 }, (_, k) => String(r[k] ?? '').trim());
-      try { rows.push(cleanPartner({ code: c[0], name: c[1], ...parseKind(c[2]), tax_code: c[3], address: c[4], phone: c[5], email: c[6], contact: c[7], note: c[8] })); }
+      try { rows.push(cleanPartner({ code: String(r[0]).trim(), name: String(r[1] ?? '').trim(), tax_code: String(r[2] ?? '').trim() })); }
       catch (e) { throw fail(`Dòng ${i + 1}: ${e.message}`); } });
-    if (!rows.length) throw fail('File không có dữ liệu (dòng 1 là tiêu đề, từ dòng 2: Mã, Tên, Loại, MST, Địa chỉ, Điện thoại, Email, Người liên hệ, Ghi chú)');
+    if (!rows.length) throw fail('File không có dữ liệu (dòng 1 là tiêu đề, từ dòng 2: Mã, Tên, Mã số thuế)');
     let created = 0, updated = 0;
     tx(() => { for (const p of rows) {
-      const ex = D.partners.find((x) => ci(x.code, p.code));
-      if (ex) { Object.assign(ex, p, { updated_at: now() }); updated++; } else { D.partners.push({ id: nextId('partners'), ...p, created_at: now() }); created++; }
+      const ex = D.partners.find((x) => x.kind === kind && ci(x.code, p.code));
+      if (ex) { Object.assign(ex, p, { updated_at: now() }); updated++; } else { D.partners.push({ id: nextId('partners'), kind, ...p, created_at: now() }); created++; }
     } });
-    audit(user, 'PARTNER_IMPORT', `Nhập Excel đối tượng: thêm ${created}, cập nhật ${updated}`); return { created, updated };
+    audit(user, 'PARTNER_IMPORT', `Nhập Excel danh mục ${KIND_NAME[kind]}: thêm ${created}, cập nhật ${updated}`); return { created, updated };
   });
   function analyticsCtx() {
     const A = D.settings.opening_date || '0000-00-00';
@@ -626,8 +622,9 @@
       const want = query.type === 'N' || query.type === 'X' ? query.type : parsed.type || 'X';
       const digits = String(parsed.tax_code || '').replace(/\D/g, '');
       const nn = (x) => String(x || '').normalize('NFC').toLowerCase().replace(/\s+/g, ' ').trim();
-      const pm = (digits && D.partners.find((x) => String(x.tax_code || '').replace(/\D/g, '') === digits)) || (parsed.partner && D.partners.find((x) => nn(x.name) === nn(parsed.partner)));
-      if (pm) { parsed.partner_id = pm.id; parsed.partner_code = pm.code; parsed.partner_ok = want === 'N' ? !!pm.is_supplier : !!pm.is_customer; if (!parsed.address) parsed.address = pm.address; }
+      const pool = D.partners.filter((x) => x.kind === (want === 'N' ? 'NCC' : 'KH'));
+      const pm = (digits && pool.find((x) => String(x.tax_code || '').replace(/\D/g, '') === digits)) || (parsed.partner && pool.find((x) => nn(x.name) === nn(parsed.partner)));
+      if (pm) { parsed.partner_id = pm.id; parsed.partner_code = pm.code; }
     }
     audit(user, 'PDF_UPLOAD', `${f.name} -> ${parsed.error ? 'lỗi: ' + parsed.error : `nhận diện ${parsed.lines.length} dòng hàng, số ${parsed.number || '?'}`}`);
     return { ...parsed, attachment: name, filename: f.name };
