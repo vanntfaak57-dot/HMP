@@ -218,3 +218,7 @@ table.lines input[data-f=unit_price] { min-width: 105px; }
 input[readonly] { background: var(--panel-2, #eef2f6); }
 .short { font-size: 11px; color: var(--danger, #c62828); font-weight: 600; white-space: nowrap; }
 .no-values .v { display: none !important; }
+.app-ver { font-size: 11px; opacity: .6; margin-top: 4px; }
+.ver-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.ver-big { font-size: 24px; font-weight: 700; }
+.up-notes { white-space: pre-wrap; margin-top: 6px; font-size: 13px; color: var(--text, #1f2933); }

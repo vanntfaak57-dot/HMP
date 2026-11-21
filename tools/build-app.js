@@ -1,7 +1,9 @@
 // Đóng gói phần mềm thành 1 file chạy độc lập (không cần cài Node.js) bằng Node.js Single Executable Application.
-//   node tools/build-app.js            -> bản Windows (KhoETC.exe) + bản Linux
-//   node tools/build-app.js win        -> chỉ bản Windows
-// Kết quả: build/dist/*.zip
+//   node tools/build-app.js                 -> gói cập nhật + bản Windows (KhoETC.exe) + bản Linux
+//   node tools/build-app.js update          -> chỉ gói cập nhật (.khoupd + latest.json)
+//   node tools/build-app.js win --version 1.2.0
+// Phiên bản mặc định lấy từ package.json; ghi chú phát hành lấy từ mục tương ứng trong CHANGELOG.md.
+// Kết quả: build/dist/
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -16,7 +18,40 @@ const CACHE = path.join(BUILD, 'cache');
 const DIST = path.join(BUILD, 'dist');
 const NODE_VERSION = process.version; // blob SEA phải tạo bằng đúng phiên bản Node của file chạy
 const APP_NAME = 'KhoETC';
-const targets = process.argv.slice(2).length ? process.argv.slice(2) : ['win', 'linux'];
+const argv = process.argv.slice(2);
+const vIdx = argv.indexOf('--version');
+const VERSION = vIdx >= 0 ? argv.splice(vIdx, 2)[1] : require('../package.json').version;
+if (!/^\d+\.\d+\.\d+$/.test(VERSION)) throw new Error('Phiên bản không hợp lệ: ' + VERSION);
+const targets = argv.length ? argv : ['update', 'win', 'linux'];
+
+// Ghi chú phát hành của phiên bản (mục "## x.y.z" trong CHANGELOG.md)
+function releaseNotes() {
+  try {
+    const md = fs.readFileSync(path.join(ROOT, 'CHANGELOG.md'), 'utf8');
+    const m = md.match(new RegExp('^## ' + VERSION.replace(/\./g, '\\.') + '[^\\n]*\\n([\\s\\S]*?)(?=^## |$(?![\\s\\S]))', 'm'));
+    return m ? m[1].trim() : '';
+  } catch { return ''; }
+}
+
+// Nhúng toàn bộ thư mục public vào mã (module ảo "kho:assets")
+const assetsPlugin = {
+  name: 'kho-assets',
+  setup(b) {
+    b.onResolve({ filter: /^kho:assets$/ }, () => ({ path: 'kho-assets', namespace: 'kho' }));
+    b.onLoad({ filter: /.*/, namespace: 'kho' }, () => {
+      const map = {};
+      for (const f of fs.readdirSync(path.join(ROOT, 'public'))) map['/' + f] = fs.readFileSync(path.join(ROOT, 'public', f)).toString('base64');
+      return { contents: 'module.exports = ' + JSON.stringify(map) + ';', loader: 'js' };
+    });
+  },
+};
+const esbuildOpts = (entry, outfile) => ({
+  entryPoints: [path.join(ROOT, entry)], bundle: true, platform: 'node', target: 'node22', format: 'cjs',
+  outfile, legalComments: 'none', logLevel: 'warning', plugins: [assetsPlugin],
+  define: { 'process.env.KHO_BUILD_VERSION': JSON.stringify(VERSION) },
+  // pdf.js 1.10 tự tìm thư viện vẽ ảnh "canvas" (không cần cho việc đọc chữ)
+  external: ['canvas'],
+});
 
 for (const d of [WORK, CACHE, DIST]) fs.mkdirSync(d, { recursive: true });
 const log = (...a) => console.log('>>', ...a);
@@ -53,28 +88,38 @@ async function nodeBinary(target) {
 }
 
 async function main() {
-  // 1. Gộp mã nguồn thành 1 file
-  log('Gộp mã nguồn (esbuild)...');
-  const bundle = path.join(WORK, 'kho.js');
-  require('esbuild').buildSync({
-    entryPoints: [path.join(ROOT, 'server.js')], bundle: true, platform: 'node', target: 'node22', format: 'cjs',
-    outfile: bundle, legalComments: 'none', logLevel: 'warning',
-    // pdf.js 1.10 tự tìm thư viện vẽ ảnh "canvas" (không cần cho việc đọc chữ)
-    external: ['canvas'],
-  });
+  const esbuild = require('esbuild');
+  log(`Phiên bản ${VERSION}`);
 
-  // 2. Cấu hình SEA: nhúng toàn bộ thư mục public
-  const assets = {};
-  for (const f of fs.readdirSync(path.join(ROOT, 'public'))) assets['public/' + f] = path.join(ROOT, 'public', f);
+  // 1. Gói cập nhật: toàn bộ phần mềm trong 1 file JS, nén gzip, dòng đầu ghi phiên bản
+  if (targets.includes('update')) {
+    log('Tạo gói cập nhật...');
+    const appJs = path.join(WORK, 'kho-app.js');
+    await esbuild.build(esbuildOpts('server.js', appJs));
+    const header = '// KHO-UPDATE ' + JSON.stringify({ version: VERSION, built: new Date().toISOString() }) + '\n';
+    const pkgName = `${APP_NAME}-update-${VERSION}.khoupd`;
+    const pkg = require('zlib').gzipSync(Buffer.concat([Buffer.from(header), fs.readFileSync(appJs)]), { level: 9 });
+    fs.writeFileSync(path.join(DIST, pkgName), pkg);
+    const manifest = { version: VERSION, url: pkgName, sha256: crypto.createHash('sha256').update(pkg).digest('hex'), size: pkg.length, notes: releaseNotes(), released: new Date().toISOString().slice(0, 10) };
+    fs.writeFileSync(path.join(DIST, 'latest.json'), JSON.stringify(manifest, null, 2) + '\n');
+    log(`Xong: build/dist/${pkgName} (${(pkg.length / 1048576).toFixed(1)} MB) + build/dist/latest.json`);
+  }
+  const apps = targets.filter((t) => t !== 'update');
+  if (!apps.length) return;
+
+  // 2. File chạy: trình khởi chạy + bản gốc gộp thành 1 file
+  log('Gộp mã nguồn cho file chạy (esbuild)...');
+  const bundle = path.join(WORK, 'kho.js');
+  await esbuild.build(esbuildOpts('launcher.js', bundle));
   const blob = path.join(WORK, 'kho.blob');
   const seaConfig = path.join(WORK, 'sea-config.json');
-  fs.writeFileSync(seaConfig, JSON.stringify({ main: bundle, output: blob, disableExperimentalSEAWarning: true, useSnapshot: false, useCodeCache: false, assets }, null, 2));
+  fs.writeFileSync(seaConfig, JSON.stringify({ main: bundle, output: blob, disableExperimentalSEAWarning: true, useSnapshot: false, useCodeCache: false }, null, 2));
   log('Tạo gói SEA...');
   execFileSync(process.execPath, ['--experimental-sea-config', seaConfig], { stdio: 'inherit' });
 
   const postject = path.join(ROOT, 'node_modules', 'postject', 'dist', 'cli.js');
   const readme = fs.readFileSync(path.join(__dirname, 'HUONG-DAN-APP.txt'), 'utf8');
-  for (const target of targets) {
+  for (const target of apps) {
     const dirName = `${APP_NAME}-${target === 'win' ? 'Windows' : 'Linux'}-x64`;
     const outDir = path.join(DIST, dirName);
     fs.rmSync(outDir, { recursive: true, force: true });

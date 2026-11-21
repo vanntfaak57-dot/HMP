@@ -34,6 +34,7 @@ assert '#/' not in app
 
 body = html.split('<body>')[1].split('<script')[0]
 body = hashfix(body)
+body = rep(body, '<a href="#update" class="admin-only">Cập nhật phần mềm</a>', '')
 body = rep(body, '<button class="btn primary" type="submit">Đăng nhập</button>',
   '<button class="btn primary" type="submit">Đăng nhập</button>\n      <div class="demo-hint"><b>Tài khoản dùng thử</b><br>Quản trị: <code>admin</code> / <code>admin123</code><br>Kế toán: <code>ketoan</code> / <code>ketoan123</code><br>Thủ kho: <code>thukho</code> / <code>thukho123</code><br>'
   '<span class="muted">Dữ liệu mẫu, lưu trong trình duyệt của bạn.</span> <a href="#" id="demo-reset-login">Nạp lại dữ liệu mẫu</a></div>')

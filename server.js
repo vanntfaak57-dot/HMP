@@ -19,6 +19,11 @@ if (sea) {
 }
 const express = require('express');
 const multer = require('multer');
+// Phiên bản phần mềm (gói cập nhật ghi đè qua KHO_BUILD_VERSION lúc đóng gói)
+const APP_VERSION = process.env.KHO_BUILD_VERSION || require('./package.json').version;
+// Giao diện nhúng sẵn trong bản đóng gói / gói cập nhật (khi chạy từ mã nguồn thì đọc thư mục public)
+let EMBEDDED = null;
+try { EMBEDDED = require('kho:assets'); } catch { EMBEDDED = null; }
 const crypto = require('crypto');
 const ExcelJS = require('exceljs');
 
@@ -50,14 +55,14 @@ app.use((req, res, next) => {
   if (process.env.COOKIE_SECURE === '1') res.setHeader('Strict-Transport-Security', 'max-age=31536000');
   next();
 });
-if (sea) {
-  // Giao diện được nhúng bên trong file chạy
+if (EMBEDDED) {
+  // Giao diện được nhúng bên trong bản đóng gói / gói cập nhật
   const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
   app.use((req, res, next) => {
     if (req.method !== 'GET' || req.path.startsWith('/api/')) return next();
     const name = req.path === '/' ? '/index.html' : req.path;
-    let buf;
-    try { buf = sea.getAsset('public' + name); } catch { return next(); }
+    if (!Object.prototype.hasOwnProperty.call(EMBEDDED, name)) return next();
+    const buf = Buffer.from(EMBEDDED[name], 'base64');
     res.setHeader('Content-Type', MIME[path.extname(name)] || 'application/octet-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.end(Buffer.from(buf));
@@ -107,6 +112,7 @@ app.use('/api', (req, res, next) => {
 });
 app.post('/api/logout', h(auth.logout));
 app.get('/api/me', (req, res) => res.json({
+  version: APP_VERSION,
   user: auth.publicUser(req.user),
   settings: { company_name: getSetting('company_name', ''), company_address: getSetting('company_address', ''), opening_date: getSetting('opening_date') },
 }));
@@ -162,6 +168,139 @@ app.get('/api/backup', adminOnly, h((req, res) => {
   db.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
   audit(req, 'BACKUP', 'Tải bản sao lưu dữ liệu ' + name);
   res.download(tmp, name, () => fs.rm(tmp, { force: true }, () => {}));
+}));
+
+
+// ---------------- Cập nhật phần mềm ----------------
+// Gói cập nhật (.khoupd) = gzip của 1 file JS đã gộp toàn bộ phần mềm, dòng đầu là thông tin phiên bản:
+//   // KHO-UPDATE {"version":"1.2.0","built":"..."}
+const zlib = require('zlib');
+const cmpVer = (a, b) => {
+  const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0);
+  return 0;
+};
+const DEFAULT_UPDATE_URL = 'https://github.com/vanntfaak57-dot/HMP/releases/latest/download/latest.json';
+const updateUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 60 * 1024 * 1024 } });
+let updating = false;
+
+function versionInfo() {
+  return {
+    version: APP_VERSION, builtin_version: process.env.KHO_BUILTIN_VERSION || APP_VERSION,
+    running_update: !!process.env.KHO_RUNNING_UPDATE, update_url: getSetting('update_url', DEFAULT_UPDATE_URL),
+    mode: process.env.KHO_DOCKER === '1' ? 'docker' : sea ? 'app' : 'node',
+  };
+}
+function parsePackage(buf) {
+  let code;
+  try { code = zlib.gunzipSync(buf).toString('utf8'); } catch { throw fail('File không phải gói cập nhật hợp lệ (.khoupd)'); }
+  const m = code.match(/^\/\/ KHO-UPDATE (\{.*\})\n/);
+  if (!m) throw fail('File không phải gói cập nhật của phần mềm Quản lý kho');
+  let meta;
+  try { meta = JSON.parse(m[1]); } catch { throw fail('Thông tin phiên bản trong gói cập nhật bị hỏng'); }
+  if (!/^\d+\.\d+\.\d+$/.test(meta.version || '')) throw fail('Số phiên bản trong gói cập nhật không hợp lệ');
+  return { meta, code };
+}
+// Khởi động lại tiến trình để chạy phiên bản mới
+function restartApp() {
+  console.log('\n>> Đang khởi động lại để chạy phiên bản mới...');
+  const done = () => setTimeout(() => process.exit(0), 400);
+  // Docker / Render: thoát, nền tảng tự khởi động lại container
+  if (process.env.KHO_DOCKER === '1' || process.env.KHO_RESTART_MODE === 'exit') return done();
+  const { spawn } = require('child_process');
+  const args = sea ? process.argv.slice(2) : [...process.execArgv, ...process.argv.slice(1)];
+  const env = { ...process.env, KHO_RESTART: '1', NO_BROWSER: '1' };
+  delete env.KHO_RUNNING_UPDATE;
+  if (process.platform === 'win32') {
+    // mở cửa sổ mới cho phần mềm (cửa sổ cũ tự đóng)
+    spawn('cmd.exe', ['/c', 'start', '""', process.execPath, ...args], { detached: true, stdio: 'ignore', windowsHide: true, env }).unref();
+  } else {
+    spawn(process.execPath, args, { detached: true, stdio: 'ignore', env }).unref();
+  }
+  done();
+}
+function applyUpdate(req, buf, source) {
+  if (updating) throw fail('Đang cập nhật, vui lòng đợi');
+  const { meta, code } = parsePackage(buf);
+  const builtin = process.env.KHO_BUILTIN_VERSION || APP_VERSION;
+  if (cmpVer(meta.version, APP_VERSION) <= 0) throw fail(`Gói cập nhật là phiên bản ${meta.version}, không mới hơn phiên bản đang chạy ${APP_VERSION}`);
+  updating = true;
+  try {
+    const DATA = process.env.DATA_DIR || path.join(__dirname, 'data');
+    // 1. Sao lưu dữ liệu trước khi cập nhật
+    const bdir = path.join(DATA, 'backups');
+    fs.mkdirSync(bdir, { recursive: true });
+    const stamp = now().replace(/[-: ]/g, '');
+    let backup = path.join(bdir, `truoc-cap-nhat-${APP_VERSION}-len-${meta.version}-${stamp}.db`);
+    for (let i = 2; fs.existsSync(backup); i++) backup = path.join(bdir, `truoc-cap-nhat-${APP_VERSION}-len-${meta.version}-${stamp}-${i}.db`);
+    db.exec(`VACUUM INTO '${backup.replace(/'/g, "''")}'`);
+    // 2. Ghi bản mới và chọn làm bản chạy
+    const appDir = path.join(DATA, 'app');
+    fs.mkdirSync(appDir, { recursive: true });
+    const file = `kho-${meta.version}.js`;
+    fs.writeFileSync(path.join(appDir, file + '.tmp'), code);
+    fs.renameSync(path.join(appDir, file + '.tmp'), path.join(appDir, file));
+    fs.writeFileSync(path.join(appDir, 'current.json'), JSON.stringify({ version: meta.version, file, installed_at: now(), installed_by: req.user.username, from: APP_VERSION, builtin }, null, 2));
+    audit(req, 'UPDATE', `Cập nhật phần mềm ${APP_VERSION} → ${meta.version} (${source}); đã sao lưu dữ liệu: ${path.basename(backup)}`);
+    // Xóa các bản cập nhật cũ, giữ bản vừa cài và bản đang chạy
+    for (const f of fs.readdirSync(appDir)) {
+      if (/^kho-\d+\.\d+\.\d+\.js$/.test(f) && f !== file && f !== `kho-${APP_VERSION}.js`) fs.rmSync(path.join(appDir, f), { force: true });
+    }
+    return { version: meta.version, backup: path.basename(backup) };
+  } catch (e) { updating = false; throw e; }
+}
+
+app.get('/api/version', (req, res) => res.json(versionInfo()));
+app.put('/api/update/url', adminOnly, h((req, res) => {
+  const url = String(req.body?.url || '').trim();
+  if (url && !/^https:\/\/\S+$/.test(url) && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(url)) throw fail('Địa chỉ kiểm tra cập nhật phải bắt đầu bằng https://');
+  setSetting('update_url', url || DEFAULT_UPDATE_URL);
+  audit(req, 'SETTINGS_UPDATE', 'Địa chỉ kiểm tra cập nhật: ' + (url || DEFAULT_UPDATE_URL));
+  res.json({ ok: true });
+}));
+async function fetchManifest() {
+  const url = getSetting('update_url', DEFAULT_UPDATE_URL);
+  let r;
+  try { r = await fetch(url, { headers: { 'User-Agent': 'KhoETC-updater' }, signal: AbortSignal.timeout(20000) }); }
+  catch (e) { throw fail('Không kết nối được máy chủ cập nhật: ' + (e.cause?.code || e.message)); }
+  if (r.status === 404) throw fail('Không tìm thấy thông tin phiên bản mới tại địa chỉ cập nhật (kho GitHub chưa có bản phát hành, hoặc kho để chế độ riêng tư). Có thể tải gói cập nhật lên thủ công.');
+  if (!r.ok) throw fail(`Máy chủ cập nhật trả lỗi ${r.status}`);
+  let m;
+  try { m = await r.json(); } catch { throw fail('Thông tin phiên bản tại địa chỉ cập nhật không đúng định dạng'); }
+  if (!/^\d+\.\d+\.\d+$/.test(m.version || '') || !m.url) throw fail('Thông tin phiên bản tại địa chỉ cập nhật thiếu version/url');
+  return { ...m, url: new URL(m.url, url).href };
+}
+app.post('/api/update/check', adminOnly, h(async (req, res) => {
+  const m = await fetchManifest();
+  res.json({ current: APP_VERSION, latest: m.version, notes: m.notes || '', available: cmpVer(m.version, APP_VERSION) > 0 });
+}));
+app.post('/api/update/download', adminOnly, h(async (req, res) => {
+  const m = await fetchManifest();
+  if (cmpVer(m.version, APP_VERSION) <= 0) throw fail(`Đang dùng phiên bản mới nhất (${APP_VERSION})`);
+  let r;
+  try { r = await fetch(m.url, { headers: { 'User-Agent': 'KhoETC-updater' }, signal: AbortSignal.timeout(180000) }); }
+  catch (e) { throw fail('Không tải được gói cập nhật: ' + (e.cause?.code || e.message)); }
+  if (!r.ok) throw fail(`Tải gói cập nhật lỗi ${r.status}`);
+  const buf = Buffer.from(await r.arrayBuffer());
+  if (m.sha256 && crypto.createHash('sha256').update(buf).digest('hex') !== String(m.sha256).toLowerCase()) throw fail('Gói cập nhật tải về bị lỗi (mã kiểm tra SHA256 không khớp), đã hủy cập nhật');
+  const out = applyUpdate(req, buf, 'tải từ ' + new URL(m.url).host);
+  res.json({ ok: true, ...out, restarting: true });
+  restartApp();
+}));
+app.post('/api/update/upload', adminOnly, updateUpload.single('file'), h((req, res) => {
+  if (!req.file) throw fail('Chưa chọn file gói cập nhật');
+  const out = applyUpdate(req, req.file.buffer, 'tải lên ' + String(req.file.originalname).slice(0, 80));
+  res.json({ ok: true, ...out, restarting: true });
+  restartApp();
+}));
+app.post('/api/update/rollback', adminOnly, h((req, res) => {
+  if (!process.env.KHO_RUNNING_UPDATE) throw fail('Đang chạy bản gốc, không có bản cập nhật để gỡ');
+  const DATA = process.env.DATA_DIR || path.join(__dirname, 'data');
+  const cur = path.join(DATA, 'app', 'current.json');
+  fs.renameSync(cur, cur + '.rolledback');
+  audit(req, 'UPDATE', `Gỡ bản cập nhật ${APP_VERSION}, quay về bản gốc ${process.env.KHO_BUILTIN_VERSION}`);
+  res.json({ ok: true, version: process.env.KHO_BUILTIN_VERSION, restarting: true });
+  restartApp();
 }));
 
 // ---------------- Danh mục vật tư hàng hóa ----------------
@@ -910,13 +1049,18 @@ function openBrowser(url) {
 const localUrl = `http://${HOST === '0.0.0.0' ? '127.0.0.1' : HOST}:${PORT}`;
 const server = app.listen(PORT, HOST, (err) => {
   if (err) return; // Express 5 gọi lại cả khi lỗi (cổng bận): xử lý ở server.on('error')
-  console.log(`Ứng dụng Quản lý kho đang chạy: http://${HOST}:${PORT}`);
+  console.log(`Ứng dụng Quản lý kho ${APP_VERSION}${process.env.KHO_RUNNING_UPDATE ? ' (bản cập nhật)' : ''} đang chạy: http://${HOST}:${PORT}`);
   if (sea) {
     console.log(`\n  ${getSetting('company_name', 'Quản lý kho')}\n  Mở trình duyệt tại: ${localUrl}\n  Dữ liệu lưu tại:   ${process.env.DATA_DIR}\n\n  KHÔNG đóng cửa sổ này trong khi đang dùng phần mềm.\n`);
     if (process.env.NO_BROWSER !== '1') openBrowser(localUrl);
   }
 });
+let listenTries = 0;
 server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE' && process.env.KHO_RESTART === '1' && listenTries++ < 40) {
+    // vừa khởi động lại sau cập nhật: đợi tiến trình cũ nhả cổng
+    return setTimeout(() => server.listen(PORT, HOST), 500);
+  }
   if (e.code === 'EADDRINUSE') {
     // Đã có một cửa sổ phần mềm đang chạy: chỉ mở lại trình duyệt
     console.log(`Phần mềm đã đang chạy ở cổng ${PORT}. Đang mở trình duyệt...`);

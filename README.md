@@ -69,8 +69,21 @@ npm run build:app
 
 Tạo `build/dist/KhoETC-Windows-x64.zip` (file `KhoETC.exe`) và bản Linux. Người dùng chỉ cần giải nén, bấm đúp `KhoETC.exe`: trình duyệt tự mở phần mềm, dữ liệu nằm trong thư mục `data` cạnh file chạy. Xem `tools/HUONG-DAN-APP.txt`.
 
+## Cập nhật phần mềm
+
+Quản trị vào **Hệ thống → Cập nhật phần mềm**:
+- **Kiểm tra cập nhật**: đọc `latest.json` trong bản phát hành mới nhất (Releases) của kho GitHub, tải gói `.khoupd`, kiểm tra SHA256, cài đặt.
+- **Cập nhật bằng file**: tải lên file `KhoETC-update-x.y.z.khoupd`.
+- Trước khi cài, phần mềm tự sao lưu CSDL vào `data/backups`, ghi bản mới vào `data/app`, rồi tự khởi động lại (app trên máy: mở tiến trình mới; Docker/Render: container tự khởi động lại). Bản cập nhật lỗi khi khởi động thì tự quay về bản gốc; có nút **Quay về bản gốc**.
+
+Phát hành phiên bản mới:
+1. Tăng `version` trong `package.json`, ghi thay đổi vào `CHANGELOG.md`.
+2. `npm run build:app` → `build/dist/` có `KhoETC-update-x.y.z.khoupd`, `latest.json`, `KhoETC-Windows-x64.zip`, `KhoETC-Linux-x64.zip`.
+3. Tạo Release trên GitHub, đính kèm các file trên (bắt buộc có `latest.json` và file `.khoupd`).
+
 ## Kiểm thử
 
 ```bash
-npm test
+npm test                 # nghiệp vụ
+node test/test-update.js # cập nhật phần mềm
 ```

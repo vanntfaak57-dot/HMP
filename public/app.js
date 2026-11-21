@@ -14,7 +14,7 @@ const ACTIONS = {
   ITEM_CREATE: 'Thêm mã hàng', ITEM_UPDATE: 'Sửa mã hàng', ITEM_DELETE: 'Xóa mã hàng', ITEM_BULK_DELETE: 'Xóa hàng loạt mã hàng', ITEM_IMPORT: 'Nhập Excel danh mục',
   VOUCHER_CREATE: 'Thêm chứng từ', VOUCHER_UPDATE: 'Sửa chứng từ', VOUCHER_DELETE: 'Xóa chứng từ', VOUCHER_POST: 'Ghi sổ chứng từ', VOUCHER_UNPOST: 'Bỏ ghi chứng từ', PDF_UPLOAD: 'Tải PDF',
   COSTING_RUN: 'Tính giá xuất kho', PERIOD_LOCK: 'Khóa sổ', PERIOD_UNLOCK: 'Mở khóa sổ', USER_CREATE: 'Thêm người dùng',
-  USER_UPDATE: 'Sửa người dùng', PARTNER_CREATE: 'Thêm KH/NCC', PARTNER_UPDATE: 'Sửa KH/NCC', PARTNER_DELETE: 'Xóa KH/NCC', PARTNER_IMPORT: 'Nhập Excel KH/NCC', SETTINGS_UPDATE: 'Sửa cài đặt', EXPORT: 'Xuất báo cáo', BACKUP: 'Sao lưu dữ liệu',
+  USER_UPDATE: 'Sửa người dùng', PARTNER_CREATE: 'Thêm KH/NCC', PARTNER_UPDATE: 'Sửa KH/NCC', PARTNER_DELETE: 'Xóa KH/NCC', PARTNER_IMPORT: 'Nhập Excel KH/NCC', SETTINGS_UPDATE: 'Sửa cài đặt', EXPORT: 'Xuất báo cáo', BACKUP: 'Sao lưu dữ liệu', UPDATE: 'Cập nhật phần mềm',
 };
 
 const VAT_OPTIONS = [['', '-- Chưa chọn --'], ['0', '0%'], ['5', '5%'], ['8', '8%'], ['10', '10%'], ['KCT', 'KCT – Không chịu thuế'], ['KKKNT', 'KKKNT – Không kê khai, tính nộp thuế']];
@@ -80,6 +80,7 @@ async function boot() {
   try {
     const r = await api('/api/me');
     ME = r.user; SETTINGS = r.settings;
+    if ($('#app-version')) $('#app-version').textContent = r.version ? 'Phiên bản ' + r.version : '';
   } catch { showLogin(); return; }
   $('#login-view').classList.add('hidden');
   $('#app-view').classList.remove('hidden');
@@ -109,6 +110,7 @@ const routes = [
   [/^#\/users$/, pageUsers],
   [/^#\/audit$/, pageAudit],
   [/^#\/settings$/, pageSettings],
+  [/^#\/update$/, pageUpdate],
   [/^#\/account$/, pageAccount],
 ];
 async function route() {
@@ -1099,6 +1101,76 @@ async function pageSettings() {
     if (!body.opening_date) delete body.opening_date;
     body.number_digits = Number(body.number_digits);
     try { await api('/api/settings', { method: 'PUT', body }); toast('Đã lưu'); await boot(); } catch (err) { toast(err.message, true); }
+  });
+}
+
+// ---------- Cập nhật phần mềm ----------
+async function pageUpdate() {
+  const v = await api('/api/version');
+  const MODE = { app: 'App trên máy (KhoETC)', docker: 'Máy chủ online (Docker)', node: 'Chạy từ mã nguồn' };
+  $('#main').innerHTML = `<h1>Cập nhật phần mềm</h1>
+    <div class="card"><div class="ver-grid">
+      <div><div class="muted small">Phiên bản đang chạy</div><div class="ver-big">${esc(v.version)}</div></div>
+      <div><div class="muted small">Nguồn</div><div>${v.running_update ? `Bản cập nhật (bản gốc ${esc(v.builtin_version)})` : 'Bản gốc'}</div></div>
+      <div><div class="muted small">Kiểu chạy</div><div>${esc(MODE[v.mode] || v.mode)}</div></div>
+    </div></div>
+    <div class="alert info">Trước khi cập nhật, phần mềm tự <b>sao lưu dữ liệu</b> (thư mục data/backups) rồi tự khởi động lại; dữ liệu được giữ nguyên.
+      Nên báo người dùng khác thoát ra trong lúc cập nhật (khoảng 10–30 giây).</div>
+    <div class="card"><h2 style="margin-top:0">Cập nhật qua mạng</h2>
+      <div class="toolbar"><button class="btn primary" id="up-check">Kiểm tra cập nhật</button><span id="up-result" class="muted"></span></div>
+      <details><summary class="muted">Địa chỉ kiểm tra cập nhật</summary>
+        <div class="toolbar" style="margin-top:8px"><input id="up-url" style="flex:1;min-width:240px" value="${esc(v.update_url)}"><button class="btn" id="up-url-save">Lưu địa chỉ</button></div>
+        <p class="muted small">Mặc định lấy file latest.json trong bản phát hành mới nhất (Releases) của kho GitHub. Kho để chế độ riêng tư thì dùng cách tải gói lên bên dưới.</p></details>
+    </div>
+    <div class="card"><h2 style="margin-top:0">Cập nhật bằng file</h2>
+      <p class="muted">Chọn file gói cập nhật <b>KhoETC-update-x.y.z.khoupd</b>.</p>
+      <label class="btn">Chọn file gói cập nhật<input type="file" id="up-file" accept=".khoupd" hidden></label>
+    </div>
+    ${v.running_update ? `<div class="card"><h2 style="margin-top:0">Quay về bản gốc</h2><p class="muted">Gỡ bản cập nhật ${esc(v.version)}, chạy lại bản gốc ${esc(v.builtin_version)} đi kèm phần mềm. Dữ liệu giữ nguyên.</p>
+      <button class="btn danger" id="up-rollback">Quay về bản gốc ${esc(v.builtin_version)}</button></div>` : ''}
+    <div id="up-progress"></div>`;
+  // Chờ phần mềm khởi động lại với phiên bản mới rồi tải lại trang
+  const waitRestart = async (target) => {
+    $('#up-progress').innerHTML = `<div class="alert info"><b>Đang khởi động lại phần mềm${target ? ' với phiên bản ' + esc(target) : ''}…</b> Trang sẽ tự tải lại.</div>`;
+    const t0 = Date.now();
+    await new Promise((r) => setTimeout(r, 1500));
+    while (Date.now() - t0 < 120000) {
+      try {
+        const r = await fetch('/api/version', { credentials: 'same-origin' });
+        if (r.ok) { const d = await r.json(); if (!target || d.version === target) { location.reload(); return; } }
+      } catch { /* đang khởi động lại */ }
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    $('#up-progress').innerHTML = '<div class="alert">Phần mềm chưa khởi động lại sau 2 phút. Hãy mở lại phần mềm (bấm KhoETC.exe) rồi tải lại trang.</div>';
+  };
+  $('#up-url-save').addEventListener('click', async () => {
+    try { await api('/api/update/url', { method: 'PUT', body: { url: $('#up-url').value } }); toast('Đã lưu địa chỉ kiểm tra cập nhật'); } catch (err) { toast(err.message, true); }
+  });
+  $('#up-check').addEventListener('click', async () => {
+    $('#up-result').textContent = 'Đang kiểm tra…';
+    try {
+      const r = await api('/api/update/check', { method: 'POST' });
+      if (!r.available) { $('#up-result').textContent = `Đang dùng phiên bản mới nhất (${r.current}).`; return; }
+      $('#up-result').innerHTML = `Có phiên bản mới <b>${esc(r.latest)}</b>. <button class="btn primary small" id="up-go">Cập nhật ngay</button>${r.notes ? `<div class="up-notes">${esc(r.notes)}</div>` : ''}`;
+      $('#up-go').addEventListener('click', async () => {
+        if (!confirm(`Cập nhật lên phiên bản ${r.latest}? Phần mềm sẽ sao lưu dữ liệu rồi khởi động lại.`)) return;
+        try { const d = await api('/api/update/download', { method: 'POST' }); toast(`Đã cài phiên bản ${d.version}, sao lưu: ${d.backup}`); waitRestart(d.version); }
+        catch (err) { toast(err.message, true); }
+      });
+    } catch (err) { $('#up-result').textContent = ''; toast(err.message, true); }
+  });
+  $('#up-file').addEventListener('change', async (e) => {
+    const f = e.target.files[0]; e.target.value = '';
+    if (!f) return;
+    if (!confirm(`Cập nhật phần mềm bằng file ${f.name}? Phần mềm sẽ sao lưu dữ liệu rồi khởi động lại.`)) return;
+    const fd = new FormData(); fd.append('file', f);
+    $('#up-progress').innerHTML = '<div class="alert info">Đang tải gói cập nhật lên…</div>';
+    try { const d = await api('/api/update/upload', { method: 'POST', body: fd }); toast(`Đã cài phiên bản ${d.version}, sao lưu: ${d.backup}`); waitRestart(d.version); }
+    catch (err) { $('#up-progress').innerHTML = ''; toast(err.message, true); }
+  });
+  $('#up-rollback')?.addEventListener('click', async () => {
+    if (!confirm(`Gỡ bản cập nhật ${v.version} và quay về bản gốc ${v.builtin_version}?`)) return;
+    try { const d = await api('/api/update/rollback', { method: 'POST' }); waitRestart(d.version); } catch (err) { toast(err.message, true); }
   });
 }
 

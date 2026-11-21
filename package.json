@@ -1,13 +1,14 @@
 {
   "name": "quan-ly-kho",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Ứng dụng quản lý kho - nhập xuất tồn, giá vốn bình quân gia quyền cuối kỳ",
   "main": "server.js",
   "scripts": {
-    "start": "node --no-warnings server.js",
+    "start": "node --no-warnings launcher.js",
     "test": "node --no-warnings test/test.js",
     "build:app": "node tools/build-app.js",
-    "test:app": "APP_BIN=build/dist/KhoETC-Linux-x64/KhoETC node test/test.js"
+    "test:app": "APP_BIN=build/dist/KhoETC-Linux-x64/KhoETC node test/test.js",
+    "build:update": "node tools/build-app.js update"
   },
   "engines": {
     "node": ">=22.13"
