@@ -68,7 +68,10 @@ const step = (s) => console.log('✔', s);
     step('Hai danh mục KH và NCC độc lập (Mã/Tên/MST); chặn chọn NCC trên phiếu xuất');
 
     const pdfPath = path.join(dir, 'px.pdf');
-    execFileSync(process.execPath, [path.join(__dirname, 'make-pdf.js'), pdfPath]);
+    // Dùng PDF mẫu có sẵn (demo/sample.pdf, sinh bởi test/make-pdf.js); không có thì sinh mới (cần Playwright)
+    const samplePdf = path.join(__dirname, '..', 'demo', 'sample.pdf');
+    if (fs.existsSync(samplePdf)) fs.copyFileSync(samplePdf, pdfPath);
+    else execFileSync(process.execPath, [path.join(__dirname, 'make-pdf.js'), pdfPath]);
     const fd = new FormData(); fd.append('file', new Blob([fs.readFileSync(pdfPath)], { type: 'application/pdf' }), 'phieu_xuat.pdf');
     const p = await ok('/api/pdf/parse?type=X', { method: 'POST', body: fd });
     assert.equal(p.partner_id, KH.id);

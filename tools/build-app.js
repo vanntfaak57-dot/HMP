@@ -72,6 +72,7 @@ const sha256 = (file) => crypto.createHash('sha256').update(fs.readFileSync(file
 
 async function nodeBinary(target) {
   if (target === 'linux' && process.platform === 'linux') return process.execPath;
+  if (target === 'win' && process.platform === 'win32') return process.execPath; // dựng ngay trên Windows
   if (target !== 'win') throw new Error('Chưa hỗ trợ: ' + target);
   const file = path.join(CACHE, `node-${NODE_VERSION}-win-x64.exe`);
   if (!fs.existsSync(file)) {
@@ -133,7 +134,8 @@ async function main() {
     fs.writeFileSync(path.join(outDir, 'kho-config.json'), JSON.stringify({ port: 3000, host: '127.0.0.1' }, null, 2) + '\n');
     const zip = path.join(DIST, dirName + '.zip');
     fs.rmSync(zip, { force: true });
-    execFileSync('zip', ['-r', '-q', '-9', zip, dirName], { cwd: DIST });
+    if (process.platform === 'win32') execFileSync('tar', ['-a', '-c', '-f', zip, dirName], { cwd: DIST }); // tar.exe có sẵn trên Windows 10+
+    else execFileSync('zip', ['-r', '-q', '-9', zip, dirName], { cwd: DIST });
     log(`Xong: ${path.relative(ROOT, zip)} (${(fs.statSync(zip).size / 1048576).toFixed(1)} MB)`);
   }
 }
