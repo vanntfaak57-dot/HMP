@@ -26,13 +26,15 @@ jobs:
       - name: Dựng KhoETC.exe
         run: node tools/build-app.js win
       - name: Kiểm thử KhoETC.exe trên Windows
-        shell: bash
+        shell: pwsh
         run: |
-          mkdir -p "$RUNNER_TEMP/app"
-          (cd "$RUNNER_TEMP/app" && tar -xf "$GITHUB_WORKSPACE/build/dist/KhoETC-Windows-x64.zip")
-          export APP_BIN="$RUNNER_TEMP/app/KhoETC-Windows-x64/KhoETC.exe" TEST_TMP="$RUNNER_TEMP"
+          Expand-Archive build/dist/KhoETC-Windows-x64.zip -DestinationPath "$env:RUNNER_TEMP\app"
+          $env:APP_BIN = "$env:RUNNER_TEMP\app\KhoETC-Windows-x64\KhoETC.exe"
+          $env:TEST_TMP = $env:RUNNER_TEMP
           node test/test.js
+          if ($LASTEXITCODE -ne 0) { exit 1 }
           node test/test-update.js
+          if ($LASTEXITCODE -ne 0) { exit 1 }
       - name: Dừng tiến trình còn chạy
         if: always()
         shell: bash
