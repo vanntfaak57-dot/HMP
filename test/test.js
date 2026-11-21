@@ -67,6 +67,11 @@ const step = (s) => console.log('✔', s);
     await ok('/api/vouchers', { method: 'POST', body: { type: 'X', date: '2026-10-20', lines: [{ item_id: C.id, qty: 1, unit_price: 500 }] } });
     await ok('/api/vouchers', { method: 'POST', body: { type: 'X', date: '2026-10-25', lines: [{ item_id: C.id, qty: 1, unit_price: 500 }] } });
     step('Lưu phiếu xuất từ PDF và nhập tay');
+    const bd = await ok('/api/items/bulk-delete', { method: 'POST', body: { ids: [V.id, A.id, 99999] } });
+    assert.deepEqual(bd.deleted, ['VT009']);
+    assert.deepEqual(bd.skipped.map((s) => s.code), ['VT001', '#99999']);
+    assert.ok(!(await ok('/api/items')).some((i) => i.code === 'VT009'));
+    step('Xóa hàng loạt: xóa mã chưa phát sinh, giữ lại mã đã có chứng từ kèm lý do');
 
     // Tháng 11
     await ok('/api/vouchers', { method: 'POST', body: { type: 'N', date: '2026-11-03', lines: [{ item_id: A.id, qty: 20, unit_price: 90000 }] } });

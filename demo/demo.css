@@ -89,6 +89,12 @@ th, td { padding: 7px 9px; border-bottom: 1px solid var(--line); text-align: lef
 th { background: var(--panel-2); font-weight: 600; font-size: 12px; white-space: nowrap; }
 td.num, th.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 tr:hover td { background: var(--hover); }
+.chk-col { width: 36px; padding: 0 !important; text-align: center; }
+.chk { display: flex; align-items: center; justify-content: center; min-height: 36px; cursor: pointer; }
+.chk input { width: 16px; height: 16px; cursor: pointer; margin: 0; }
+tr.sel td { background: var(--primary-soft, #e6f0fa); }
+.bulk-bar { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 3px 4px 3px 10px; border-radius: 6px; background: var(--primary-soft, #e6f0fa); }
+.bulk-bar[hidden] { display: none; }
 tfoot td { font-weight: 700; background: var(--panel-2); }
 table.lines input { width: 100%; min-width: 70px; }
 table.lines td { padding: 4px 5px; }

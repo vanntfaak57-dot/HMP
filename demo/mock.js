@@ -432,6 +432,24 @@
     D.items = D.items.filter((i) => i !== it); markDirty(firstMonth());
     audit(user, 'ITEM_DELETE', `${it.code} - ${it.name}`); return { ok: true };
   }); });
+  R('POST', '/api/items/bulk-delete', ({ user, body }) => { W(user);
+    const ids = [...new Set((body.ids || []).map(Number).filter(Number.isInteger))];
+    if (!ids.length) throw fail('Chưa chọn mã hàng nào');
+    const locked = Object.values(D.periods).some((p) => p.locked);
+    const deleted = [], skipped = [];
+    tx(() => {
+      for (const id of ids) {
+        const it = D.items.find((i) => i.id === id);
+        if (!it) { skipped.push({ code: `#${id}`, reason: 'Không còn tồn tại' }); continue; }
+        if (D.lines.some((l) => l.item_id === id)) { skipped.push({ code: it.code, name: it.name, reason: 'Đã phát sinh chứng từ nhập/xuất' }); continue; }
+        if (locked && (it.opening_qty || it.opening_value)) { skipped.push({ code: it.code, name: it.name, reason: 'Có số dư đầu kỳ và đã có kỳ khóa sổ' }); continue; }
+        D.items = D.items.filter((i) => i !== it); deleted.push(it.code);
+      }
+      if (deleted.length) markDirty(firstMonth());
+    });
+    audit(user, 'ITEM_BULK_DELETE', `Xóa ${deleted.length} mã: ${deleted.join(', ') || '(không có)'}${skipped.length ? ` | bỏ qua ${skipped.length}: ${skipped.map((s) => `${s.code} (${s.reason})`).join(', ')}` : ''}`);
+    return { deleted, skipped };
+  });
   R('POST', '/api/items/import', async ({ user, body }) => {
     W(user);
     const f = body.get('file'); if (!f) throw fail('Chưa chọn file');

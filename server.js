@@ -140,6 +140,29 @@ app.delete('/api/items/:id', canWrite, h((req, res) => {
   res.json({ ok: true });
 }));
 
+// Xóa hàng loạt: xóa các mã được phép, trả về danh sách mã bị bỏ qua kèm lý do
+app.post('/api/items/bulk-delete', canWrite, h((req, res) => {
+  const ids = [...new Set((req.body?.ids || []).map(Number).filter(Number.isInteger))];
+  if (!ids.length) throw fail('Chưa chọn mã hàng nào');
+  if (ids.length > 5000) throw fail('Mỗi lần xóa tối đa 5.000 mã');
+  const locked = db.prepare('SELECT COUNT(*) c FROM periods WHERE locked = 1').get().c > 0;
+  const used = db.prepare('SELECT COUNT(*) c FROM voucher_lines WHERE item_id = ?');
+  const deleted = [], skipped = [];
+  tx(() => {
+    for (const id of ids) {
+      const it = db.prepare('SELECT * FROM items WHERE id = ?').get(id);
+      if (!it) { skipped.push({ code: `#${id}`, reason: 'Không còn tồn tại' }); continue; }
+      if (used.get(id).c) { skipped.push({ code: it.code, name: it.name, reason: 'Đã phát sinh chứng từ nhập/xuất' }); continue; }
+      if (locked && (it.opening_qty || it.opening_value)) { skipped.push({ code: it.code, name: it.name, reason: 'Có số dư đầu kỳ và đã có kỳ khóa sổ' }); continue; }
+      db.prepare('DELETE FROM items WHERE id = ?').run(id);
+      deleted.push(it.code);
+    }
+    if (deleted.length) costing.markDirty(costing.firstMonth() || '0000-00');
+  });
+  audit(req, 'ITEM_BULK_DELETE', `Xóa ${deleted.length} mã: ${deleted.join(', ') || '(không có)'}${skipped.length ? ` | bỏ qua ${skipped.length}: ${skipped.map((s) => `${s.code} (${s.reason})`).join(', ')}` : ''}`.slice(0, 8000));
+  res.json({ deleted, skipped });
+}));
+
 // Mẫu Excel nhập danh mục + tồn đầu kỳ
 app.get('/api/items/template.xlsx', h(async (req, res) => {
   const wb = new ExcelJS.Workbook();

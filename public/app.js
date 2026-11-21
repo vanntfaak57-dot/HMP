@@ -11,7 +11,7 @@ const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${Stri
 const TYPE = { N: 'Phiếu nhập kho', X: 'Phiếu xuất kho bán hàng' };
 const ACTIONS = {
   LOGIN_OK: 'Đăng nhập', LOGIN_FAIL: 'Đăng nhập thất bại', LOGOUT: 'Đăng xuất', PASSWORD_CHANGE: 'Đổi mật khẩu',
-  ITEM_CREATE: 'Thêm mã hàng', ITEM_UPDATE: 'Sửa mã hàng', ITEM_DELETE: 'Xóa mã hàng', ITEM_IMPORT: 'Nhập Excel danh mục',
+  ITEM_CREATE: 'Thêm mã hàng', ITEM_UPDATE: 'Sửa mã hàng', ITEM_DELETE: 'Xóa mã hàng', ITEM_BULK_DELETE: 'Xóa hàng loạt mã hàng', ITEM_IMPORT: 'Nhập Excel danh mục',
   VOUCHER_CREATE: 'Thêm chứng từ', VOUCHER_UPDATE: 'Sửa chứng từ', VOUCHER_DELETE: 'Xóa chứng từ', PDF_UPLOAD: 'Tải PDF',
   COSTING_RUN: 'Tính giá xuất kho', PERIOD_LOCK: 'Khóa sổ', PERIOD_UNLOCK: 'Mở khóa sổ', USER_CREATE: 'Thêm người dùng',
   USER_UPDATE: 'Sửa người dùng', SETTINGS_UPDATE: 'Sửa cài đặt', EXPORT: 'Xuất báo cáo',
@@ -151,19 +151,44 @@ async function pageItems() {
   const items = await api('/api/items');
   let filter = '';
   let vatFilter = '';
+  const selected = new Set(); // id các mã đang được tích chọn
+  const W = canWrite();
+  let list = [];
+  const updateSelection = () => {
+    // Chỉ giữ lựa chọn trong các dòng đang hiển thị để tránh xóa nhầm dòng bị bộ lọc ẩn
+    const visible = new Set(list.map((i) => i.id));
+    for (const id of [...selected]) if (!visible.has(id)) selected.delete(id);
+    $$('#items-body tr[data-id]').forEach((tr) => {
+      const on = selected.has(Number(tr.dataset.id));
+      tr.classList.toggle('sel', on);
+      const cb = $('input[data-sel]', tr); if (cb) cb.checked = on;
+    });
+    const all = $('#items-all');
+    if (all) {
+      all.checked = list.length > 0 && selected.size === list.length;
+      all.indeterminate = selected.size > 0 && selected.size < list.length;
+    }
+    const bar = $('#items-bulk');
+    if (bar) {
+      bar.hidden = selected.size === 0;
+      $('#items-bulk-count').textContent = selected.size.toLocaleString('vi-VN');
+    }
+  };
   const render = () => {
     const f = filter.toLowerCase();
-    const list = items.filter((i) => (!f || i.code.toLowerCase().includes(f) || i.name.toLowerCase().includes(f)) && (!vatFilter || (vatFilter === '-' ? !i.vat_rate : i.vat_rate === vatFilter)));
+    list = items.filter((i) => (!f || i.code.toLowerCase().includes(f) || i.name.toLowerCase().includes(f)) && (!vatFilter || (vatFilter === '-' ? !i.vat_rate : i.vat_rate === vatFilter)));
     const tq = list.reduce((s, i) => s + i.opening_value, 0);
-    $('#items-body').innerHTML = list.map((i) => `<tr>
+    $('#items-body').innerHTML = list.map((i) => `<tr data-id="${i.id}">
+      ${W ? `<td class="chk-col"><label class="chk"><input type="checkbox" data-sel="${i.id}" aria-label="Chọn ${esc(i.code)}"></label></td>` : ''}
       <td>${esc(i.code)}</td><td>${esc(i.name)}</td><td>${esc(i.unit)}</td>
       <td class="num">${i.vat_rate ? esc(vatLabel(i.vat_rate)) : '<span class="muted">—</span>'}</td>
       <td class="num">${fmtN(i.opening_qty, 3)}</td><td class="num">${fmtM(i.opening_value)}</td>
       <td class="num">${i.opening_qty ? fmtN(i.opening_value / i.opening_qty) : ''}</td>
       <td class="num">${fmtN(i.stock_qty, 3)}</td>
       <td>${canWrite() ? `<button class="btn small" data-edit="${i.id}">Sửa</button> <button class="btn small danger" data-del="${i.id}">Xóa</button>` : ''}</td></tr>`).join('')
-      || '<tr><td colspan="9" class="muted">Chưa có mã hàng</td></tr>';
-    $('#items-foot').innerHTML = `<tr><td colspan="5">Tổng cộng (${list.length} mã)</td><td class="num">${fmtM(tq)}</td><td colspan="3"></td></tr>`;
+      || `<tr><td colspan="${W ? 10 : 9}" class="muted">Chưa có mã hàng</td></tr>`;
+    $('#items-foot').innerHTML = `<tr><td colspan="${W ? 6 : 5}">Tổng cộng (${list.length} mã)</td><td class="num">${fmtM(tq)}</td><td colspan="3"></td></tr>`;
+    updateSelection();
   };
   $('#main').innerHTML = `
     <h1>Danh mục vật tư hàng hóa &amp; số dư đầu kỳ</h1>
@@ -171,16 +196,47 @@ async function pageItems() {
     <div class="toolbar">
       <input id="items-filter" placeholder="Tìm mã, tên hàng…" style="width:260px">
       <select id="items-vat"><option value="">Mọi thuế suất</option>${VAT_OPTIONS.slice(1).map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}<option value="-">Chưa khai báo thuế suất</option></select>
+      ${W ? `<span id="items-bulk" class="bulk-bar" hidden>Đã chọn <b id="items-bulk-count">0</b> mã
+        <button class="btn danger" id="items-bulk-del" type="button">Xóa các mã đã chọn</button>
+        <button class="btn" id="items-bulk-clear" type="button">Bỏ chọn</button></span>` : ''}
       <span class="spacer"></span>
       ${canWrite() ? `<button class="btn primary" id="item-add">+ Thêm mã hàng</button>
       <a class="btn" href="/api/items/template.xlsx">Tải file Excel mẫu</a>
       <label class="btn">Nhập từ Excel<input type="file" id="item-import" accept=".xlsx" hidden></label>` : ''}
     </div>
-    <div class="table-wrap"><table><thead><tr><th>Mã hàng</th><th>Tên hàng</th><th>ĐVT</th><th class="num">Thuế suất GTGT</th><th class="num">SL tồn đầu</th><th class="num">Giá trị tồn đầu</th><th class="num">Đơn giá đầu kỳ</th><th class="num">SL tồn hiện tại</th><th></th></tr></thead>
+    <div class="table-wrap"><table><thead><tr>${W ? '<th class="chk-col"><label class="chk"><input type="checkbox" id="items-all" aria-label="Chọn tất cả" title="Chọn tất cả"></label></th>' : ''}<th>Mã hàng</th><th>Tên hàng</th><th>ĐVT</th><th class="num">Thuế suất GTGT</th><th class="num">SL tồn đầu</th><th class="num">Giá trị tồn đầu</th><th class="num">Đơn giá đầu kỳ</th><th class="num">SL tồn hiện tại</th><th></th></tr></thead>
     <tbody id="items-body"></tbody><tfoot id="items-foot"></tfoot></table></div>`;
   render();
   $('#items-filter').addEventListener('input', (e) => { filter = e.target.value; render(); });
   $('#items-vat').addEventListener('change', (e) => { vatFilter = e.target.value; render(); });
+  $('#items-body').addEventListener('change', (e) => {
+    const cb = e.target.closest('[data-sel]'); if (!cb) return;
+    const id = Number(cb.dataset.sel);
+    if (cb.checked) selected.add(id); else selected.delete(id);
+    updateSelection();
+  });
+  $('#items-all')?.addEventListener('change', (e) => {
+    if (e.target.checked) list.forEach((i) => selected.add(i.id)); else selected.clear();
+    updateSelection();
+  });
+  $('#items-bulk-clear')?.addEventListener('click', () => { selected.clear(); updateSelection(); });
+  $('#items-bulk-del')?.addEventListener('click', async () => {
+    const chosen = items.filter((i) => selected.has(i.id));
+    if (!chosen.length) return;
+    const preview = chosen.slice(0, 8).map((i) => i.code).join(', ') + (chosen.length > 8 ? ` và ${chosen.length - 8} mã khác` : '');
+    if (!confirm(`Xóa ${chosen.length} mã hàng: ${preview}? Mã đã phát sinh chứng từ sẽ được giữ lại.`)) return;
+    try {
+      const r = await api('/api/items/bulk-delete', { method: 'POST', body: { ids: chosen.map((i) => i.id) } });
+      toast(`Đã xóa ${r.deleted.length} mã hàng${r.skipped.length ? `, giữ lại ${r.skipped.length} mã` : ''}`);
+      await route();
+      if (r.skipped.length) {
+        modal(`<h2>Không xóa được ${r.skipped.length} mã hàng</h2>
+          <div class="table-wrap"><table><thead><tr><th>Mã hàng</th><th>Tên hàng</th><th>Lý do</th></tr></thead><tbody>
+          ${r.skipped.map((s) => `<tr><td>${esc(s.code)}</td><td>${esc(s.name || '')}</td><td>${esc(s.reason)}</td></tr>`).join('')}</tbody></table></div>
+          <div class="actions"><button class="btn primary" data-close>Đóng</button></div>`);
+      }
+    } catch (err) { toast(err.message, true); }
+  });
   $('#main').addEventListener('click', async (e) => {
     const ed = e.target.closest('[data-edit]'), del = e.target.closest('[data-del]');
     if (ed) itemDialog(items.find((i) => i.id == ed.dataset.edit));
