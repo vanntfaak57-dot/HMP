@@ -187,3 +187,6 @@ input[readonly] { background: var(--panel-2, #eef2f6); }
 .ver-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
 .ver-big { font-size: 24px; font-weight: 700; }
 .up-notes { white-space: pre-wrap; margin-top: 6px; font-size: 13px; color: var(--text, #1f2933); }
+.lan-link { display: flex; gap: 14px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line, #dde3ea); flex-wrap: wrap; }
+.lan-qr svg { width: 110px; height: 110px; display: block; background: #fff; border-radius: 4px; }
+.lan-url { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 16px; }

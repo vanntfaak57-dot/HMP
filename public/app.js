@@ -1088,6 +1088,10 @@ async function pageSettings() {
     <p class="muted wide" style="margin:0" id="num-preview"></p>
     </form><p class="muted">Số dư tồn kho nhập trong danh mục vật tư là số dư cuối ngày A. Mọi chứng từ phải có ngày sau ngày A. Không đổi được ngày A khi đã có chứng từ trước ngày đó hoặc đã khóa sổ.</p>
     <button class="btn primary" id="s-save">Lưu cài đặt</button></div>
+    <div class="card" id="lan-card" hidden></div>
+    <div class="card" id="shutdown-card" hidden><h2 style="margin-top:0">Tắt phần mềm</h2>
+      <p class="muted">Phần mềm chạy ngầm trên máy này (không có cửa sổ riêng). Tắt phần mềm thì mọi máy đều không truy cập được cho đến khi mở lại KhoETC.exe.</p>
+      <button class="btn danger" id="shutdown-btn">Tắt phần mềm</button></div>
     <div class="card" id="backup-card"><h2 style="margin-top:0">Sao lưu dữ liệu</h2>
       <p class="muted">Tải về toàn bộ dữ liệu (danh mục, chứng từ, người dùng, nhật ký) thành 1 file .db. Nên tải định kỳ và cất ở nơi an toàn. File PDF đính kèm không nằm trong bản sao lưu này.</p>
       <a class="btn" href="/api/backup">Tải bản sao lưu dữ liệu</a></div>`;
@@ -1096,11 +1100,67 @@ async function pageSettings() {
     $('#num-preview').textContent = `Ví dụ: phiếu nhập ${$('[name=number_prefix_N]').value}${'1'.padStart(d, '0')}, phiếu xuất ${$('[name=number_prefix_X]').value}${'1'.padStart(d, '0')}. Số tiếp theo = số lớn nhất đang có cùng ký hiệu + 1.`;
   };
   $$('#s-form [name^=number_]').forEach((i) => i.addEventListener('input', preview)); preview();
+  renderLanCard().catch(() => { /* bản demo không có chức năng này */ });
+  api('/api/version').then((v) => {
+    if (v.mode === 'docker') return;
+    $('#shutdown-card').hidden = false;
+    $('#shutdown-btn').addEventListener('click', async () => {
+      if (!confirm('Tắt phần mềm? Mọi người đang dùng sẽ bị ngắt. Muốn dùng lại, bấm đúp KhoETC.exe.')) return;
+      try { await api('/api/shutdown', { method: 'POST' }); } catch { /* đã tắt */ }
+      document.body.innerHTML = '<div style="padding:40px;font:16px sans-serif">Đã tắt phần mềm. Bấm đúp <b>KhoETC.exe</b> để mở lại.</div>';
+    });
+  }).catch(() => { /* bản demo */ });
   $('#s-save').addEventListener('click', async () => {
     const body = Object.fromEntries(new FormData($('#s-form')));
     if (!body.opening_date) delete body.opening_date;
     body.number_digits = Number(body.number_digits);
     try { await api('/api/settings', { method: 'PUT', body }); toast('Đã lưu'); await boot(); } catch (err) { toast(err.message, true); }
+  });
+}
+
+// ---------- Dùng chung trong mạng nội bộ ----------
+async function renderLanCard() {
+  const n = await api('/api/network');
+  const card = $('#lan-card');
+  card.hidden = false;
+  if (n.mode === 'docker') {
+    card.innerHTML = '<h2 style="margin-top:0">Dùng chung trong mạng nội bộ</h2><p class="muted">Bản online đang chạy trên máy chủ: mọi máy truy cập qua tên miền của máy chủ.</p>';
+    return;
+  }
+  const links = n.addresses.map((a) => `<div class="lan-link">
+      <div class="lan-qr" title="Quét bằng điện thoại">${a.qr}</div>
+      <div><div class="lan-url"><b>${esc(a.url)}</b> <button type="button" class="btn small" data-copy="${esc(a.url)}">Sao chép</button></div>
+      <div class="muted small">Mạng: ${esc(a.name)}</div></div></div>`).join('');
+  card.innerHTML = `<h2 style="margin-top:0">Dùng chung trong mạng nội bộ</h2>
+    <p>Trạng thái: ${n.lan_enabled ? '<span class="badge ok">Đang bật</span> Máy tính / điện thoại khác cùng mạng (cùng wifi hoặc cùng mạng LAN) truy cập được.' : '<span class="badge">Đang tắt</span> Chỉ máy này dùng được phần mềm.'}</p>
+    ${n.lan_enabled ? `<p>Máy khác mở trình duyệt (Chrome, Edge, Cốc Cốc…) và vào đường link:</p>${links || '<p class="muted">Máy này chưa kết nối mạng nội bộ nào.</p>'}
+      <p class="muted small">Hoặc theo tên máy: ${esc(n.hostname_url)}. Mỗi người đăng nhập bằng tài khoản riêng; dữ liệu nhập ở máy nào thì mọi máy đều thấy.
+      Máy này phải luôn bật và mở phần mềm thì máy khác mới dùng được.</p>` : ''}
+    ${n.can_change ? `<div class="toolbar" style="margin-top:10px">
+      <label>Cổng <input type="number" id="lan-port" value="${n.port}" min="1024" max="65535" style="width:100px"></label>
+      <button class="btn ${n.lan_enabled ? '' : 'primary'}" id="lan-toggle">${n.lan_enabled ? 'Tắt dùng chung (chỉ máy này dùng)' : 'Bật dùng chung trong mạng nội bộ'}</button></div>
+      <p class="muted small">Phần mềm sẽ tự khởi động lại (vài giây). Lần đầu bật, Windows có thể hỏi quyền tường lửa: chọn <b>Allow / Cho phép</b> (đánh dấu cả Private networks).
+      Nếu máy khác vẫn không vào được: chạy file <b>MO-TUONG-LUA.bat</b> trong thư mục phần mềm và đặt mạng của máy này là Private.</p>`
+    : '<p class="muted small">Chế độ mạng đang được đặt bằng biến môi trường HOST/PORT nên không đổi được ở đây.</p>'}`;
+  card.addEventListener('click', async (e) => {
+    const c = e.target.closest('[data-copy]');
+    if (c) { try { await navigator.clipboard.writeText(c.dataset.copy); toast('Đã sao chép ' + c.dataset.copy); } catch { toast(c.dataset.copy); } }
+  });
+  $('#lan-toggle')?.addEventListener('click', async () => {
+    const lan = !n.lan_enabled;
+    const port = Number($('#lan-port').value);
+    if (!confirm(lan ? 'Bật dùng chung trong mạng nội bộ? Phần mềm sẽ khởi động lại.' : 'Tắt dùng chung? Máy khác sẽ không truy cập được nữa. Phần mềm sẽ khởi động lại.')) return;
+    try {
+      await api('/api/network', { method: 'PUT', body: { lan, port } });
+      card.innerHTML = '<div class="alert info"><b>Đang khởi động lại phần mềm…</b> Trang sẽ tự tải lại.</div>';
+      const target = `${location.protocol}//${location.hostname}:${port}`;
+      await new Promise((r) => setTimeout(r, 1500));
+      for (let i = 0; i < 60; i++) {
+        try { const r = await fetch(target + '/healthz'); if (r.ok) break; } catch { /* đang khởi động */ }
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      if (target === location.origin) location.reload(); else location.href = target + '/#/settings';
+    } catch (err) { toast(err.message, true); }
   });
 }
 

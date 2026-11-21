@@ -130,6 +130,16 @@ async function main() {
     fs.chmodSync(exe, 0o755);
     log(`Nhúng ứng dụng vào ${path.basename(exe)}...`);
     execFileSync(process.execPath, [postject, exe, 'NODE_SEA_BLOB', blob, '--sentinel-fuse', 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2', '--overwrite'], { stdio: 'inherit' });
+    if (target === 'win') {
+      // Đổi PE subsystem từ console (3) sang Windows GUI (2): bấm đúp không hiện cửa sổ đen, phần mềm chạy ngầm
+      const buf = fs.readFileSync(exe);
+      const pe = buf.readUInt32LE(0x3c);
+      if (buf.toString('ascii', pe, pe + 4) !== 'PE\0\0') throw new Error('KhoETC.exe không đúng định dạng PE');
+      buf.writeUInt16LE(2, pe + 24 + 68);
+      fs.writeFileSync(exe, buf);
+      // các file hỗ trợ cho Windows
+      for (const f of ['MO-TUONG-LUA.bat', 'TU-DONG-CHAY-KHI-BAT-MAY.bat']) fs.writeFileSync(path.join(outDir, f), fs.readFileSync(path.join(__dirname, 'windows', f), 'utf8').replace(/\r?\n/g, '\r\n'));
+    }
     fs.writeFileSync(path.join(outDir, 'HUONG-DAN-SU-DUNG.txt'), (target === 'win' ? readme.replace(/\n/g, '\r\n') : readme.replace(/KhoETC\.exe/g, 'KhoETC')));
     fs.writeFileSync(path.join(outDir, 'kho-config.json'), JSON.stringify({ port: 3000, host: '127.0.0.1' }, null, 2) + '\n');
     const zip = path.join(DIST, dirName + '.zip');

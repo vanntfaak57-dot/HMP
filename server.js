@@ -3,20 +3,36 @@ process.env.TZ = process.env.TZ || 'Asia/Ho_Chi_Minh';
 const path = require('path');
 const fs = require('fs');
 
-// Chạy dạng app đóng gói (1 file KhoETC.exe): dữ liệu nằm trong thư mục "data" cạnh file chạy,
-// có thể đặt cổng / địa chỉ trong file kho-config.json cạnh file chạy: { "port": 3000, "host": "127.0.0.1" }
+// Chạy dạng app đóng gói (1 file KhoETC.exe): dữ liệu nằm trong thư mục "data" cạnh file chạy.
+// Cổng / chế độ mạng đặt trong file kho-config.json cạnh file chạy: { "port": 3000, "host": "127.0.0.1" }
+//   host "127.0.0.1": chỉ máy này dùng | host "0.0.0.0": máy khác trong mạng nội bộ truy cập được
 let sea = null;
 try { sea = require('node:sea'); if (!sea.isSea()) sea = null; } catch { sea = null; }
+const BASE_DIR = sea ? path.dirname(process.execPath) : __dirname;
 if (sea) {
   process.removeAllListeners('warning'); // ẩn cảnh báo "SQLite is an experimental feature"
-  const baseDir = path.dirname(process.execPath);
-  process.env.DATA_DIR = process.env.DATA_DIR || path.join(baseDir, 'data');
-  try {
-    const cfg = JSON.parse(fs.readFileSync(path.join(baseDir, 'kho-config.json'), 'utf8'));
-    if (cfg.port && !process.env.PORT) process.env.PORT = String(cfg.port);
-    if (cfg.host && !process.env.HOST) process.env.HOST = String(cfg.host);
-  } catch { /* không có file cấu hình: dùng mặc định */ }
+  process.env.DATA_DIR = process.env.DATA_DIR || path.join(BASE_DIR, 'data');
 }
+// App trên máy chạy ngầm (không có cửa sổ): nhật ký kỹ thuật ghi thêm vào data/logs/kho.log
+if (sea) {
+  try {
+    const logDir = path.join(process.env.DATA_DIR, 'logs');
+    fs.mkdirSync(logDir, { recursive: true });
+    const logFile = path.join(logDir, 'kho.log');
+    try { if (fs.statSync(logFile).size > 5 * 1048576) fs.renameSync(logFile, logFile + '.1'); } catch { /* chưa có file */ }
+    const util = require('util');
+    for (const level of ['log', 'warn', 'error']) {
+      const orig = console[level].bind(console);
+      console[level] = (...args) => {
+        try { orig(...args); } catch { /* không có cửa sổ để in */ }
+        try { fs.appendFileSync(logFile, `[${new Date().toLocaleString('vi-VN')}] ${util.format(...args)}\n`); } catch { /* bỏ qua */ }
+      };
+    }
+  } catch { /* bỏ qua */ }
+}
+const CONFIG_FILE = process.env.KHO_CONFIG || path.join(BASE_DIR, 'kho-config.json');
+let fileCfg = {};
+try { fileCfg = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')) || {}; } catch { fileCfg = {}; }
 const express = require('express');
 const multer = require('multer');
 // Phiên bản phần mềm (gói cập nhật ghi đè qua KHO_BUILD_VERSION lúc đóng gói)
@@ -76,7 +92,8 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 
 // Bọc handler để trả lỗi dạng JSON
 const h = (fn) => async (req, res) => {
   try { await fn(req, res); } catch (e) {
-    console.error(e);
+    // Lỗi kiểm tra dữ liệu (có mã 4xx) là thông báo cho người dùng, không phải lỗi phần mềm: không ghi nhật ký kỹ thuật
+    if (!e.status || e.status >= 500) console.error(e);
     res.status(e.status || 400).json({ error: e.message || 'Lỗi không xác định' });
   }
 };
@@ -203,7 +220,7 @@ function parsePackage(buf) {
 }
 // Khởi động lại tiến trình để chạy phiên bản mới
 function restartApp() {
-  console.log('\n>> Đang khởi động lại để chạy phiên bản mới...');
+  console.log('\n>> Đang khởi động lại phần mềm...');
   const done = () => setTimeout(() => process.exit(0), 400);
   // Docker / Render: thoát, nền tảng tự khởi động lại container
   if (process.env.KHO_DOCKER === '1' || process.env.KHO_RESTART_MODE === 'exit') return done();
@@ -300,6 +317,53 @@ app.post('/api/update/rollback', adminOnly, h((req, res) => {
   fs.renameSync(cur, cur + '.rolledback');
   audit(req, 'UPDATE', `Gỡ bản cập nhật ${APP_VERSION}, quay về bản gốc ${process.env.KHO_BUILTIN_VERSION}`);
   res.json({ ok: true, version: process.env.KHO_BUILTIN_VERSION, restarting: true });
+  restartApp();
+}));
+
+// Tắt phần mềm (app trên máy chạy ngầm, không có cửa sổ để đóng)
+app.post('/api/shutdown', adminOnly, h((req, res) => {
+  if (process.env.KHO_DOCKER === '1') throw fail('Bản online chạy trên máy chủ, không tắt từ đây');
+  audit(req, 'SETTINGS_UPDATE', 'Tắt phần mềm');
+  res.json({ ok: true });
+  console.log('>> Tắt phần mềm theo yêu cầu của ' + req.user.username);
+  setTimeout(() => process.exit(0), 300);
+}));
+
+// ---------------- Dùng chung trong mạng nội bộ ----------------
+const os = require('os');
+// Địa chỉ IPv4 trong mạng nội bộ của máy chủ
+function lanAddresses() {
+  const out = [];
+  for (const [name, list] of Object.entries(os.networkInterfaces())) {
+    for (const a of list || []) {
+      if (a.family !== 'IPv4' && a.family !== 4) continue;
+      if (a.internal || a.address.startsWith('169.254.')) continue;
+      out.push({ name, ip: a.address, url: `http://${a.address}:${PORT}` });
+    }
+  }
+  // ưu tiên dải mạng gia đình / văn phòng thường gặp
+  const rank = (ip) => (ip.startsWith('192.168.') ? 0 : ip.startsWith('10.') ? 1 : ip.startsWith('172.') ? 2 : 3);
+  return out.sort((a, b) => rank(a.ip) - rank(b.ip));
+}
+app.get('/api/network', adminOnly, h(async (req, res) => {
+  const QR = require('qrcode');
+  const addresses = await Promise.all(lanAddresses().map(async (a) => ({ ...a, qr: await QR.toString(a.url, { type: 'svg', margin: 1 }) })));
+  res.json({
+    lan_enabled: HOST === '0.0.0.0', port: PORT, hostname_url: `http://${os.hostname()}:${PORT}`, addresses,
+    mode: process.env.KHO_DOCKER === '1' ? 'docker' : sea ? 'app' : 'node',
+    can_change: process.env.KHO_DOCKER !== '1' && !process.env.HOST && !process.env.PORT,
+    config_file: CONFIG_FILE,
+  });
+}));
+app.put('/api/network', adminOnly, h((req, res) => {
+  if (process.env.KHO_DOCKER === '1') throw fail('Bản online chạy trên máy chủ: truy cập qua tên miền, không cần bật ở đây');
+  if (process.env.HOST || process.env.PORT) throw fail('Cổng / chế độ mạng đang được đặt bằng biến môi trường HOST/PORT, không đổi được từ màn hình này');
+  const lan = !!req.body?.lan;
+  const port = req.body?.port === undefined || req.body.port === '' ? PORT : Number(req.body.port);
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) throw fail('Cổng phải là số từ 1024 đến 65535');
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify({ ...fileCfg, port, host: lan ? '0.0.0.0' : '127.0.0.1' }, null, 2) + '\n');
+  audit(req, 'SETTINGS_UPDATE', `${lan ? 'Bật' : 'Tắt'} dùng chung trong mạng nội bộ, cổng ${port}`);
+  res.json({ ok: true, lan, port, restarting: true });
   restartApp();
 }));
 
@@ -1039,8 +1103,8 @@ app.get('/api/sessions', adminOnly, (req, res) => {
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Không tìm thấy' }));
 
-const PORT = Number(process.env.PORT) || 3000;
-const HOST = process.env.HOST || '127.0.0.1';
+const PORT = Number(process.env.PORT) || Number(fileCfg.port) || 3000;
+const HOST = process.env.HOST || fileCfg.host || '127.0.0.1';
 function openBrowser(url) {
   const { exec } = require('child_process');
   const cmd = process.platform === 'win32' ? `start "" "${url}"` : process.platform === 'darwin' ? `open "${url}"` : `xdg-open "${url}"`;
@@ -1051,8 +1115,12 @@ const server = app.listen(PORT, HOST, (err) => {
   if (err) return; // Express 5 gọi lại cả khi lỗi (cổng bận): xử lý ở server.on('error')
   console.log(`Ứng dụng Quản lý kho ${APP_VERSION}${process.env.KHO_RUNNING_UPDATE ? ' (bản cập nhật)' : ''} đang chạy: http://${HOST}:${PORT}`);
   if (sea) {
-    console.log(`\n  ${getSetting('company_name', 'Quản lý kho')}\n  Mở trình duyệt tại: ${localUrl}\n  Dữ liệu lưu tại:   ${process.env.DATA_DIR}\n\n  KHÔNG đóng cửa sổ này trong khi đang dùng phần mềm.\n`);
-    if (process.env.NO_BROWSER !== '1') openBrowser(localUrl);
+    const lan = HOST === '0.0.0.0' ? lanAddresses() : [];
+    console.log(`\n  ${getSetting('company_name', 'Quản lý kho')}\n  Mở trình duyệt tại: ${localUrl}\n  Dữ liệu lưu tại:   ${process.env.DATA_DIR}\n`);
+    if (lan.length) console.log(`  MÁY KHÁC TRONG MẠNG NỘI BỘ truy cập bằng đường link:\n${lan.map((a) => '    ' + a.url).join('\n')}\n    http://${os.hostname()}:${PORT}\n`);
+    else console.log('  Đang ở chế độ chỉ máy này dùng. Bật dùng chung trong mạng: Cài đặt > Dùng chung trong mạng nội bộ.\n');
+    console.log('  KHÔNG đóng cửa sổ này trong khi đang dùng phần mềm.\n');
+    if (process.env.NO_BROWSER !== '1' && !process.argv.includes('--no-browser')) openBrowser(localUrl);
   }
 });
 let listenTries = 0;
@@ -1064,7 +1132,7 @@ server.on('error', (e) => {
   if (e.code === 'EADDRINUSE') {
     // Đã có một cửa sổ phần mềm đang chạy: chỉ mở lại trình duyệt
     console.log(`Phần mềm đã đang chạy ở cổng ${PORT}. Đang mở trình duyệt...`);
-    if (sea && process.env.NO_BROWSER !== '1') openBrowser(localUrl);
+    if (sea && process.env.NO_BROWSER !== '1' && !process.argv.includes('--no-browser')) openBrowser(localUrl);
     setTimeout(() => process.exit(0), 3000);
   } else {
     console.error(e);

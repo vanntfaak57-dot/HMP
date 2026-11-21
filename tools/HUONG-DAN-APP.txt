@@ -7,14 +7,14 @@ PHẦN MỀM QUẢN LÝ KHO - KHO HÀNG ETC MDA
    - Không cần cài thêm phần mềm nào.
 
 2. MỞ PHẦN MỀM
-   - Bấm đúp vào KhoETC.exe.
-   - Một cửa sổ đen hiện ra (đây là máy chủ của phần mềm) và trình duyệt
-     tự mở trang http://127.0.0.1:3000
-   - KHÔNG đóng cửa sổ đen trong khi đang dùng. Muốn tắt phần mềm thì đóng
-     cửa sổ đen.
+   - Bấm đúp vào KhoETC.exe. Phần mềm chạy ngầm (không có cửa sổ riêng)
+     và trình duyệt tự mở trang http://127.0.0.1:3000
+   - Đóng trình duyệt KHÔNG tắt phần mềm. Mở lại: bấm đúp KhoETC.exe lần nữa
+     (hoặc vào http://127.0.0.1:3000).
+   - Tắt phần mềm: Cài đặt -> Tắt phần mềm (tài khoản Quản trị).
    - Lần đầu Windows có thể hiện cảnh báo "Windows protected your PC"
      (do file chưa có chữ ký số): bấm "More info" -> "Run anyway".
-   - Nếu tường lửa hỏi quyền mạng: chỉ dùng trên máy này thì có thể bấm Hủy.
+   - Tự chạy khi bật máy: bấm đúp TU-DONG-CHAY-KHI-BAT-MAY.bat (một lần).
 
 3. ĐĂNG NHẬP LẦN ĐẦU
    - Tên đăng nhập: admin      Mật khẩu: admin@123
@@ -29,17 +29,27 @@ PHẦN MỀM QUẢN LÝ KHO - KHO HÀNG ETC MDA
      Google Drive. Nên làm hằng ngày hoặc hằng tuần.
    - Chuyển sang máy khác: chép cả thư mục KhoETC (gồm "data") sang máy mới.
 
-5. DÙNG CHUNG CHO NHIỀU MÁY TRONG MẠNG NỘI BỘ (tùy chọn)
-   - Mở file kho-config.json, đổi "host": "127.0.0.1" thành "host": "0.0.0.0"
-     rồi mở lại phần mềm, cho phép qua tường lửa.
-   - Máy khác mở trình duyệt vào http://<địa-chỉ-IP-máy-này>:3000
-     (xem IP bằng lệnh ipconfig). Mỗi người dùng tài khoản riêng.
-   - Muốn đổi cổng 3000: sửa "port" trong kho-config.json.
+5. DÙNG CHUNG CHO NHIỀU MÁY TRONG MẠNG NỘI BỘ (giống phần mềm trực tuyến)
+   Máy cài KhoETC là "máy chủ": dữ liệu nằm trên máy này, các máy khác
+   (máy tính, điện thoại cùng wifi / cùng mạng LAN) mở trình duyệt để dùng.
+   Nhập liệu ở máy nào thì mọi máy đều thấy. Mỗi người một tài khoản.
+   a) Trên máy chủ: đăng nhập admin -> Cài đặt -> Dùng chung trong mạng
+      nội bộ -> bấm "Bật dùng chung". Phần mềm tự khởi động lại.
+   b) Windows hỏi quyền tường lửa: bấm Allow (đánh dấu Private networks).
+      Không thấy hỏi hoặc máy khác không vào được: bấm đúp MO-TUONG-LUA.bat
+      và đặt mạng của máy chủ là Private (Settings -> Network & Internet).
+   c) Trang Cài đặt hiện đường link, ví dụ http://192.168.1.10:3000 (kèm mã
+      QR để quét bằng điện thoại). Máy khác mở đường link đó và đăng nhập.
+   d) Admin tạo tài khoản cho từng người ở mục Người dùng.
+   e) Máy chủ phải luôn bật và chạy phần mềm. Nên đặt IP cố định cho máy
+      chủ trong cài đặt modem/router để đường link không đổi.
 
 6. GẶP SỰ CỐ
-   - Bấm KhoETC.exe mà không thấy gì: có thể phần mềm đang chạy sẵn, mở
-     trình duyệt vào http://127.0.0.1:3000
+   - Bấm KhoETC.exe mà không thấy gì: mở trình duyệt vào
+     http://127.0.0.1:3000 (phần mềm có thể đang chạy sẵn).
+   - Nhật ký kỹ thuật (gửi cho người hỗ trợ khi có lỗi): data\logs\kho.log
    - Quên mật khẩu admin: tắt phần mềm, mở Command Prompt tại thư mục này
      và chạy:   KhoETC.exe --reset-admin
+     (tắt phần mềm trước: Cài đặt -> Tắt phần mềm, hoặc Task Manager)
      Mật khẩu admin trở về admin@123 (bắt buộc đổi khi đăng nhập lại).
      Tài khoản khác quên mật khẩu: admin vào mục Người dùng để đặt lại.

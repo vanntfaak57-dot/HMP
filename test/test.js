@@ -21,8 +21,8 @@ const ok = async (url, opts) => { const r = await api(url, opts); if (r.status !
 const step = (s) => console.log('✔', s);
 
 (async () => {
-  if (srv) await new Promise((res) => srv.stdout.on('data', (b) => String(b).includes('đang chạy') && res()));
-  else for (let i = 0; i < 60; i++) { try { if ((await fetch(B + '/healthz')).ok) break; } catch { /* chưa sẵn sàng */ } await new Promise((r) => setTimeout(r, 500)); }
+  // đợi phần mềm sẵn sàng (app Windows chạy ngầm, không in ra cửa sổ nên kiểm tra qua /healthz)
+  for (let i = 0; i < 60; i++) { try { if ((await fetch(B + '/healthz')).ok) break; } catch { /* chưa sẵn sàng */ } await new Promise((r) => setTimeout(r, 500)); }
   try {
     assert.equal((await api('/api/items')).status, 401); step('Chặn truy cập khi chưa đăng nhập');
     assert.equal((await api('/api/login', { method: 'POST', body: { username: 'admin', password: 'sai' } })).status, 401); step('Từ chối sai mật khẩu');

@@ -61,6 +61,12 @@ Toàn bộ dữ liệu nằm trong thư mục `data/` (CSDL + file PDF đính k�
 - Chỉ đọc được PDF có lớp chữ (xuất từ phần mềm kế toán/hóa đơn điện tử). PDF dạng ảnh scan cần nhập tay.
 - Một kho duy nhất; chưa có các loại phiếu khác (trả lại hàng, xuất nội bộ, chuyển kho).
 
+## Dùng chung trong mạng nội bộ
+
+Máy cài phần mềm là máy chủ; máy tính / điện thoại khác cùng mạng (wifi, LAN) mở trình duyệt để dùng, mỗi người một tài khoản, dữ liệu dùng chung.
+Bật: Quản trị vào **Cài đặt → Dùng chung trong mạng nội bộ → Bật** (phần mềm tự khởi động lại và hiện đường link + mã QR, ví dụ `http://192.168.1.10:3000`).
+Cấu hình lưu trong `kho-config.json` cạnh file chạy (`"host": "0.0.0.0"`). App Windows kèm `MO-TUONG-LUA.bat` (mở tường lửa) và `TU-DONG-CHAY-KHI-BAT-MAY.bat`.
+
 ## Đóng gói thành app riêng (không cần cài Node.js)
 
 ```bash
@@ -86,4 +92,5 @@ Phát hành phiên bản mới:
 ```bash
 npm test                 # nghiệp vụ
 node test/test-update.js # cập nhật phần mềm
+node test/test-lan.js    # dùng chung trong mạng nội bộ
 ```

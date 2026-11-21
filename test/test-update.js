@@ -27,9 +27,15 @@ function start(extraEnv = {}) {
   let out = '';
   proc.stdout.on('data', (b) => { out += b; }); proc.stderr.on('data', (b) => { out += b; });
   proc.output = () => out;
+  // đợi phần mềm sẵn sàng qua /healthz (app Windows chạy ngầm, không in ra cửa sổ)
   return new Promise((res, rej) => {
-    const t = setTimeout(() => rej(new Error('Không khởi động được:\n' + out)), 20000);
-    proc.stdout.on('data', () => { if (out.includes('đang chạy')) { clearTimeout(t); res(); } });
+    const t0 = Date.now();
+    const tick = async () => {
+      try { if ((await fetch(B + '/healthz')).ok) return res(); } catch { /* chưa sẵn sàng */ }
+      if (Date.now() - t0 > 20000) return rej(new Error('Không khởi động được:\n' + out));
+      setTimeout(tick, 300);
+    };
+    tick();
   });
 }
 const exited = () => new Promise((res) => { if (proc.exitCode !== null) return res(); proc.on('exit', res); });
