@@ -391,7 +391,7 @@ async function pageVoucherForm(type, id) {
   $('#main').dataset.vtype = type;
   let items = await api(`/api/items?date=${v.date}&exclude=${id || 0}`);
   const editable = canWrite() && !v.locked;
-  let lines = v.lines.map((l) => ({ item_id: l.item_id, qty: l.qty, unit_price: l.unit_price, amount: l.amount, cost_price: l.cost_price, cost_amount: l.cost_amount }));
+  let lines = v.lines.map((l) => ({ item_id: l.item_id, qty: l.qty, unit_price: l.unit_price, discount_rate: l.discount_rate || 0, amount: l.amount, vat_rate: l.vat_rate ?? '', cost_price: l.cost_price, cost_amount: l.cost_amount }));
   if (!lines.length) lines.push({});
   let unmatched = [];
   let state = { attachment: v.attachment || null, source: v.source };
@@ -421,16 +421,24 @@ async function pageVoucherForm(type, id) {
         <label>${X ? 'Khách hàng' : 'Nhà cung cấp'} (chọn trong danh mục)<span class="pick-row"><input name="partner_pick" id="v-partner-pick" list="dl-partners" autocomplete="off" placeholder="Gõ mã hoặc tên…" value="${esc(curPartner ? pickLabel(curPartner) : '')}">
           ${canWrite() && !v.locked ? `<button type="button" class="btn small" id="v-partner-new" title="Thêm ${OBJ} mới vào danh mục">+ Mới</button>` : ''}</span></label>
         <label>Tên ${OBJ} in trên phiếu<input name="partner" value="${esc(v.partner)}"></label>
-        <label>Số hóa đơn / chứng từ gốc<input name="ref_no" value="${esc(v.ref_no)}"></label>
+        <label>Mã số thuế ${OBJ}<input name="tax_code" value="${esc(v.tax_code)}"></label>
+        <label>Mã kho<input name="warehouse" value="${esc(v.warehouse)}"></label>
+        <label>${X ? 'Số phiếu xuất (chứng từ gốc)' : 'Số hóa đơn / chứng từ gốc'}<input name="ref_no" value="${esc(v.ref_no)}"></label>
+        ${X ? `<label>Nhân viên bán hàng<input name="salesperson" value="${esc(v.salesperson)}"></label>` : ''}
         <label class="wide">Địa chỉ<input name="address" value="${esc(v.address)}"></label>
-        <label class="wide">${X ? 'Lý do xuất' : 'Diễn giải'}<input name="description" value="${esc(v.description)}"></label>
+        ${X ? `<label>Tên người liên hệ<input name="contact" value="${esc(v.contact)}"></label>
+        <label>Điện thoại<input name="phone" value="${esc(v.phone)}"></label>
+        <label class="span2">Địa điểm giao hàng<input name="delivery_place" value="${esc(v.delivery_place)}"></label>` : ''}
+        <label class="wide">Diễn giải<input name="description" value="${esc(v.description)}"></label>
       </div>
     </div>
     <div id="unmatched"></div>
     <div class="table-wrap"><table class="lines"><thead><tr><th>#</th><th style="min-width:150px">Mã hàng</th><th>Tên hàng</th><th>ĐVT</th>
-      ${X ? '<th class="num">Tồn kho</th>' : ''}<th class="num">Số lượng</th><th class="num">${X ? 'Đơn giá bán' : 'Đơn giá nhập'}</th><th class="num">${X ? 'Doanh thu' : 'Thành tiền'}</th>
+      ${X ? '<th class="num">Tồn kho</th>' : ''}<th class="num">Số lượng</th><th class="num">${X ? 'Đơn giá bán (-VAT)' : 'Đơn giá (-VAT)'}</th><th class="num">CK (%)</th><th class="num">Thành tiền</th>
+      <th class="num">% thuế GTGT</th><th class="num">Tiền thuế</th>
       ${X ? '<th class="num">Đơn giá vốn</th><th class="num">Tiền vốn</th>' : ''}<th></th></tr></thead>
       <tbody id="l-body"></tbody><tfoot id="l-foot"></tfoot></table></div>
+    <div class="pay-box" id="pay-box"></div>
     <datalist id="dl-partners">${kindPartners().map((p) => `<option value="${esc(pickLabel(p))}"></option>`).join('')}</datalist>
     <div id="partner-hint"></div>
     <datalist id="dl-items">${items.map((i) => `<option value="${esc(i.code)}">${esc(i.name)}</option>`).join('')}</datalist>
@@ -449,6 +457,7 @@ async function pageVoucherForm(type, id) {
     $('#v-partner-pick').value = p ? pickLabel(p) : '';
     if (p) {
       $('#v-head [name=partner]').value = p.name;
+      if (p.tax_code) $('#v-head [name=tax_code]').value = p.tax_code;
       $('#partner-hint').innerHTML = '';
     }
   }
@@ -488,7 +497,10 @@ async function pageVoucherForm(type, id) {
         ${X ? `<td class="num" style="${low ? 'color:var(--danger);font-weight:600' : ''}">${it ? fmtN(it.stock_qty, 3) : ''}</td>` : ''}
         <td><input type="number" step="any" data-f="qty" value="${l.qty ?? ''}" ${dis}></td>
         <td><input type="number" step="any" data-f="unit_price" value="${l.unit_price ?? ''}" ${dis}></td>
+        <td><input type="number" step="any" min="0" max="100" data-f="discount_rate" class="w-pct" value="${l.discount_rate || ''}" placeholder="0" ${dis}></td>
         <td><input type="number" step="any" data-f="amount" value="${l.amount ?? ''}" ${dis}></td>
+        <td><select data-f="vat_rate" ${dis}>${VAT_OPTIONS.map(([val, t]) => `<option value="${val}" ${(l.vat_rate ?? '') === val ? 'selected' : ''}>${val === '' ? '—' : /^\d+$/.test(val) ? val + '%' : val}</option>`).join('')}</select></td>
+        <td class="num" data-vat>${fmtM(vatOf(l))}</td>
         ${X ? `<td class="num">${l.cost_price != null ? fmtN(l.cost_price) : ''}</td><td class="num">${l.cost_amount != null ? fmtM(l.cost_amount) : ''}</td>` : ''}
         <td>${editable ? `<button class="btn small danger" data-rm="${i}">✕</button>` : ''}</td></tr>`;
     }).join('');
@@ -497,8 +509,12 @@ async function pageVoucherForm(type, id) {
   function renderFoot() {
     const tq = lines.reduce((s, l) => s + (Number(l.qty) || 0), 0);
     const ta = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+    const tv = lines.reduce((s, l) => s + vatOf(l), 0);
     const tc = lines.reduce((s, l) => s + (Number(l.cost_amount) || 0), 0);
-    $('#l-foot').innerHTML = `<tr><td colspan="${X ? 5 : 4}">Tổng cộng</td><td class="num">${fmtN(tq, 3)}</td><td></td><td class="num">${fmtM(ta)}</td>${X ? `<td></td><td class="num">${fmtM(tc)}</td>` : ''}<td></td></tr>`;
+    $('#l-foot').innerHTML = `<tr><td colspan="${X ? 5 : 4}">Tổng cộng</td><td class="num">${fmtN(tq, 3)}</td><td></td><td></td><td class="num">${fmtM(ta)}</td><td></td><td class="num">${fmtM(tv)}</td>${X ? `<td></td><td class="num">${fmtM(tc)}</td>` : ''}<td></td></tr>`;
+    $$('#l-body tr').forEach((tr) => { const c = $('[data-vat]', tr); if (c) c.textContent = fmtM(vatOf(lines[tr.dataset.i])); });
+    $('#pay-box').innerHTML = `<div><span>Cộng tiền hàng</span><b>${fmtM(ta)}</b></div><div><span>Tiền thuế GTGT</span><b>${fmtM(tv)}</b></div>
+      <div class="total"><span>Tổng tiền thanh toán</span><b>${fmtM(ta + tv)}</b></div><div class="words">Bằng chữ: <i>${esc(moneyWords(ta + tv))}</i></div>`;
   }
   function renderUnmatched() {
     $('#unmatched').innerHTML = unmatched.length ? `<div class="alert"><b>Dòng hàng trong PDF chưa có mã trong danh mục:</b>
@@ -512,18 +528,19 @@ async function pageVoucherForm(type, id) {
   $('#l-body').addEventListener('input', (e) => {
     const tr = e.target.closest('tr'); if (!tr) return;
     const l = lines[tr.dataset.i]; const f = e.target.dataset.f;
-    if (f === 'qty' || f === 'unit_price') {
+    if (f === 'qty' || f === 'unit_price' || f === 'discount_rate') {
       l[f] = e.target.value;
-      l.amount = Math.round((Number(l.qty) || 0) * (Number(l.unit_price) || 0));
+      l.amount = Math.round((Number(l.qty) || 0) * (Number(l.unit_price) || 0) * (1 - (Number(l.discount_rate) || 0) / 100));
       $('[data-f=amount]', tr).value = l.amount;
       renderFoot();
     } else if (f === 'amount') { l.amount = e.target.value; renderFoot(); }
+    else if (f === 'vat_rate') { l.vat_rate = e.target.value; renderFoot(); }
   });
   $('#l-body').addEventListener('change', (e) => {
     if (e.target.dataset.f !== 'code') return;
     const l = lines[e.target.closest('tr').dataset.i];
     const it = items.find((i) => i.code.toLowerCase() === e.target.value.trim().toLowerCase());
-    if (it) { l.item_id = it.id; delete l._code; } else { l.item_id = null; l._code = e.target.value; if (e.target.value) toast(`Mã "${e.target.value}" không có trong danh mục`, true); }
+    if (it) { l.item_id = it.id; delete l._code; if (!l.vat_rate) l.vat_rate = it.vat_rate || ''; } else { l.item_id = null; l._code = e.target.value; if (e.target.value) toast(`Mã "${e.target.value}" không có trong danh mục`, true); }
     renderLines();
   });
   $('#l-body').addEventListener('click', (e) => {
@@ -534,7 +551,7 @@ async function pageVoucherForm(type, id) {
   $('#unmatched').addEventListener('change', (e) => {
     const s = e.target.closest('[data-map]'); if (!s || !s.value) return;
     const u = unmatched[s.dataset.map];
-    addLine({ item_id: Number(s.value), qty: u.qty, unit_price: u.unit_price, amount: u.amount });
+    addLine({ item_id: Number(s.value), qty: u.qty, unit_price: u.unit_price, amount: u.amount, vat_rate: u.vat_rate ?? (items.find((it) => it.id === Number(s.value))?.vat_rate || ''), discount_rate: u.discount_rate || 0 });
     unmatched.splice(Number(s.dataset.map), 1); renderUnmatched(); renderLines();
   });
   $('#unmatched').addEventListener('click', (e) => {
@@ -552,7 +569,7 @@ async function pageVoucherForm(type, id) {
         bg.remove(); toast('Đã tạo mã hàng ' + body.code);
         items = await api(`/api/items?date=${$('[name=date]').value}&exclude=${id || 0}`);
         $('#dl-items').innerHTML = items.map((i) => `<option value="${esc(i.code)}">${esc(i.name)}</option>`).join('');
-        addLine({ item_id: r.id, qty: u.qty, unit_price: u.unit_price, amount: u.amount });
+        addLine({ item_id: r.id, qty: u.qty, unit_price: u.unit_price, amount: u.amount, vat_rate: u.vat_rate ?? (body.vat_rate || ''), discount_rate: u.discount_rate || 0 });
         unmatched.splice(idx, 1); renderUnmatched(); renderLines();
       } catch (err) { toast(err.message, true); }
     });
@@ -579,7 +596,9 @@ async function pageVoucherForm(type, id) {
         const head = $('#v-head');
         if (p.number) head.querySelector('[name=number]').value = p.number;
         if (p.date) head.querySelector('[name=date]').value = p.date;
-        for (const k of ['partner', 'address', 'description', 'ref_no']) if (p[k]) head.querySelector(`[name=${k}]`).value = p[k];
+        for (const k of ['partner', 'address', 'description', 'ref_no', 'tax_code', 'contact', 'phone', 'delivery_place', 'salesperson', 'warehouse']) {
+          const el = head.querySelector(`[name=${k}]`); if (p[k] && el) el.value = p[k];
+        }
         // Đối tượng trên PDF: khớp danh mục theo MST hoặc tên
         const pm = p.partner_id && kindPartners().find((x) => x.id === p.partner_id);
         if (pm) { setPartner(pm); if (p.partner) head.querySelector('[name=partner]').value = p.partner; }
@@ -589,7 +608,7 @@ async function pageVoucherForm(type, id) {
             ${canWrite() ? `<button type="button" class="btn small" data-newpartner="${esc(JSON.stringify({ name: p.partner, tax_code: p.tax_code || '' }))}">+ Thêm vào danh mục ${OBJ}</button>` : ''}</div>`;
         }
         items = await api(`/api/items?date=${head.querySelector('[name=date]').value}&exclude=${id || 0}`);
-        lines = p.lines.map((l) => ({ item_id: l.item_id, qty: l.qty, unit_price: l.unit_price, amount: l.amount }));
+        lines = p.lines.map((l) => ({ item_id: l.item_id, qty: l.qty, unit_price: l.unit_price, discount_rate: l.discount_rate || 0, amount: l.amount, vat_rate: l.vat_rate ?? '' }));
         if (!lines.length) lines.push({});
         unmatched = p.unmatched || [];
         const warns = [...p.warnings];
@@ -609,6 +628,7 @@ async function pageVoucherForm(type, id) {
 
   $('#v-save')?.addEventListener('click', async () => {
     const head = Object.fromEntries($$('#v-head input').map((i) => [i.name, i.value]));
+    head.warehouse = head.warehouse || '';
     const bad = lines.find((l) => l._code);
     if (bad) return toast(`Mã "${bad._code}" không có trong danh mục`, true);
     if (unmatched.length && !confirm(`Còn ${unmatched.length} dòng hàng trong PDF chưa gán mã. Vẫn lưu?`)) return;
@@ -628,32 +648,102 @@ async function pageVoucherForm(type, id) {
   $('#v-print')?.addEventListener('click', () => printVoucher(v));
 }
 
-function printVoucher(v) {
+// Tiền thuế GTGT của một dòng (KCT, KKKNT, chưa chọn: 0)
+function vatOf(l) {
+  const r = String(l.vat_rate ?? '');
+  return /^\d+$/.test(r) ? Math.round((Number(l.amount) || 0) * Number(r) / 100) : 0;
+}
+
+// Đọc số tiền bằng chữ: 49136 -> "Bốn mươi chín nghìn một trăm ba mươi sáu đồng chẵn."
+function moneyWords(n) {
+  n = Math.round(Number(n) || 0);
+  const neg = n < 0; n = Math.abs(n);
+  if (n === 0) return 'Không đồng.';
+  const D = ['không', 'một', 'hai', 'ba', 'bốn', 'năm', 'sáu', 'bảy', 'tám', 'chín'];
+  const read3 = (x, full) => {
+    const tr = Math.floor(x / 100), ch = Math.floor((x % 100) / 10), dv = x % 10, w = [];
+    if (full || tr) w.push(D[tr], 'trăm');
+    if (ch === 0) { if (dv && (full || tr)) w.push('linh'); }
+    else if (ch === 1) w.push('mười');
+    else w.push(D[ch], 'mươi');
+    if (dv) w.push(dv === 1 && ch > 1 ? 'mốt' : dv === 5 && ch > 0 ? 'lăm' : D[dv]);
+    return w.join(' ');
+  };
+  const UNITS = ['', 'nghìn', 'triệu', 'tỷ'];
+  const groups = [];
+  for (let x = n; x > 0; x = Math.floor(x / 1000)) groups.push(x % 1000);
+  const parts = [];
+  for (let i = groups.length - 1; i >= 0; i--) {
+    const g = groups[i];
+    if (!g) { if (i % 3 === 0 && i > 0 && parts.length && i >= 3) parts.push('tỷ'); continue; }
+    const unit = i === 0 ? '' : i % 3 === 0 ? 'tỷ' : UNITS[i % 3];
+    parts.push(read3(g, i < groups.length - 1) + (unit ? ' ' + unit : ''));
+  }
+  let t = parts.join(' ').replace(/\s+/g, ' ').replace(/(tỷ )+tỷ/g, 'tỷ').trim();
+  t = (neg ? 'âm ' : '') + t + ' đồng chẵn.';
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+// Mẫu in phiếu xuất kho bán hàng / phiếu nhập kho
+function voucherPaperHtml(v) {
   const X = v.type === 'X';
   const d = v.date.split('-');
-  const totalAmt = v.lines.reduce((s, l) => s + l.amount, 0);
-  const totalCost = v.lines.reduce((s, l) => s + (l.cost_amount || 0), 0);
-  const w = window.open('', '_blank');
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(v.number)}</title><style>
-    body{font:13px "Times New Roman",serif;margin:30px} table{border-collapse:collapse;width:100%} td,th{border:1px solid #000;padding:4px 6px} th{background:#eee}
-    .r{text-align:right}.c{text-align:center}.sig{display:flex;justify-content:space-around;margin-top:30px;text-align:center}.sig div{width:22%}
+  const f2 = (n) => Number(n || 0).toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const vatTxt = (r) => (r == null || r === '' ? '' : /^\d+$/.test(r) ? r : r);
+  const goods = v.lines.reduce((s, l) => s + l.amount, 0);
+  const vat = v.lines.reduce((s, l) => s + vatOf(l), 0);
+  const rates = [...new Set(v.lines.map((l) => l.vat_rate).filter((r) => r != null && r !== ''))];
+  const rateTxt = rates.length === 1 ? (/^\d+$/.test(rates[0]) ? rates[0] + ' %' : rates[0]) : rates.length ? rates.map((r) => (/^\d+$/.test(r) ? r + '%' : r)).join(', ') : '';
+  const row = (label, val, cls = '') => `<div class="ln ${cls}"><b>- ${label}:</b> ${esc(val || '')}</div>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(v.number)}</title><style>
+    body{font:13px/1.45 "Times New Roman",Times,serif;margin:28px 34px;color:#000}
+    .hd{display:flex;justify-content:space-between;gap:20px}.hd .co{font-size:12px}.hd .co b{font-size:13px;text-transform:uppercase}
+    .hd .mst{text-align:right;font-weight:bold;align-self:flex-end;white-space:nowrap}
+    h1{text-align:center;font-size:20px;margin:20px 0 2px}.dt{text-align:center;font-style:italic;font-weight:bold}.so{text-align:center;margin:4px 0 14px}
+    .ln{margin:3px 0 3px 4px}.ln.u b{font-style:italic;text-decoration:underline}.sub{margin:3px 0 3px 22px}
+    table{border-collapse:collapse;width:100%;margin-top:4px}td,th{border:1px solid #000;padding:3px 4px;vertical-align:middle;font-size:12px}
+    th{font-weight:bold;text-align:center}.r{text-align:right}.c{text-align:center}.sum td{border:none;padding:3px 6px}
+    .box{border:1px solid #000;border-top:none}.box td{border:none;border-top:1px solid #000}
+    .words{margin-top:12px;font-size:14px}.words i{font-weight:bold}.datel{text-align:right;font-style:italic;margin:14px 40px 4px 0}
+    .sig{display:flex;justify-content:space-around;text-align:center;margin-top:6px}.sig div{width:24%}.sig i{font-size:12px}
   </style></head><body>
-    <div><b>${esc(SETTINGS.company_name || '')}</b><br>${esc(SETTINGS.company_address || '')}</div>
-    <h2 class="c" style="margin:18px 0 4px">${X ? 'PHIẾU XUẤT KHO BÁN HÀNG' : 'PHIẾU NHẬP KHO'}</h2>
-    <div class="c">Ngày ${d[2]} tháng ${d[1]} năm ${d[0]} &nbsp;&nbsp; Số: <b>${esc(v.number)}</b></div><br>
-    <div>${X ? 'Khách hàng' : 'Họ tên người giao hàng / Nhà cung cấp'}: ${esc(v.partner)}</div>
-    <div>Địa chỉ: ${esc(v.address)}</div>
-    <div>${X ? 'Lý do xuất' : 'Diễn giải'}: ${esc(v.description)}</div>
-    ${v.ref_no ? `<div>Theo chứng từ số: ${esc(v.ref_no)}</div>` : ''}<br>
-    <table><tr><th>STT</th><th>Mã hàng</th><th>Tên hàng</th><th>ĐVT</th><th>Số lượng</th>
-      ${X ? '<th>Đơn giá vốn</th><th>Tiền vốn</th><th>Đơn giá bán</th><th>Doanh thu</th>' : '<th>Đơn giá</th><th>Thành tiền</th>'}</tr>
-    ${v.lines.map((l, i) => `<tr><td class="c">${i + 1}</td><td>${esc(l.code)}</td><td>${esc(l.name)}</td><td>${esc(l.unit)}</td><td class="r">${fmtN(l.qty, 3)}</td>
-      ${X ? `<td class="r">${l.cost_price != null ? fmtN(l.cost_price) : ''}</td><td class="r">${l.cost_amount != null ? fmtM(l.cost_amount) : ''}</td><td class="r">${fmtN(l.unit_price)}</td><td class="r">${fmtM(l.amount)}</td>`
-        : `<td class="r">${fmtN(l.unit_price)}</td><td class="r">${fmtM(l.amount)}</td>`}</tr>`).join('')}
-    <tr><td colspan="5" class="c"><b>Cộng</b></td>${X ? `<td></td><td class="r"><b>${fmtM(totalCost)}</b></td><td></td><td class="r"><b>${fmtM(totalAmt)}</b></td>` : `<td></td><td class="r"><b>${fmtM(totalAmt)}</b></td>`}</tr></table>
-    <div class="sig"><div><b>Người lập phiếu</b><br><i>(Ký, họ tên)</i></div><div><b>${X ? 'Người nhận hàng' : 'Người giao hàng'}</b><br><i>(Ký, họ tên)</i></div>
-      <div><b>Thủ kho</b><br><i>(Ký, họ tên)</i></div><div><b>Kế toán trưởng</b><br><i>(Ký, họ tên)</i></div></div>
-    <script>window.onload=()=>window.print()<\/script></body></html>`);
+    <div class="hd"><div class="co"><b>${esc(SETTINGS.company_name || '')}</b><br>${esc(SETTINGS.company_address || '')}</div>
+      <div class="mst">${esc(SETTINGS.company_tax || '')}</div></div>
+    <h1>${X ? 'PHIẾU XUẤT KHO BÁN HÀNG' : 'PHIẾU NHẬP KHO'}</h1>
+    <div class="dt">Ngày ${d[2]} tháng ${d[1]} năm ${d[0]}</div>
+    <div class="so">Số: <b>${esc(v.number)}</b></div>
+    ${row(X ? 'Tên khách hàng' : 'Tên nhà cung cấp', v.partner)}
+    ${row('Địa chỉ', v.address)}
+    ${X ? row('Địa điểm giao hàng', v.delivery_place, 'u') + row('Tên người liên hệ', v.contact) + row('Điện thoại', v.phone) : ''}
+    ${row('Mã số thuế', v.tax_code)}
+    ${row('Diễn giải', v.description)}
+    ${X ? row('Nhân viên bán hàng', v.salesperson) : ''}
+    <div class="sub">Mã kho: ${esc(v.warehouse || '')}</div>
+    <div class="sub">${X ? 'Số phiếu xuất' : 'Số chứng từ gốc'}: ${esc(v.ref_no || '')}</div>
+    <table><thead><tr><th style="width:22px">TT</th><th>Mã hàng</th><th>Tên hàng</th><th>Đơn vị</th><th>Mã kho</th><th>Số lượng</th>
+      <th>Đơn giá (+VAT)</th><th>Đơn giá (-VAT)</th><th>Thành tiền</th><th style="width:42px">Tỷ lệ CK (%)</th><th style="width:44px">% thuế GTGT</th></tr></thead><tbody>
+    ${v.lines.map((l, i) => {
+      const r = String(l.vat_rate ?? '');
+      const withVat = /^\d+$/.test(r) ? l.unit_price * (1 + Number(r) / 100) : l.unit_price;
+      return `<tr><td class="c">${i + 1}</td><td>${esc(l.code)}</td><td>${esc(l.name)}</td><td class="c">${esc(l.unit)}</td><td class="c">${esc(v.warehouse || '')}</td>
+        <td class="r">${fmtN(l.qty, 3)}</td><td class="r">${f2(withVat)}</td><td class="r">${f2(l.unit_price)}</td><td class="r">${fmtM(l.amount)}</td>
+        <td class="r">${f2(l.discount_rate)}</td><td class="r">${esc(vatTxt(l.vat_rate))}</td></tr>`;
+    }).join('')}
+    <tr><td colspan="8"><b>Cộng</b></td><td class="r"><b>${fmtM(goods)}</b></td><td></td><td></td></tr></tbody></table>
+    <table class="box"><tr><td style="width:42%"></td><td colspan="2" style="width:38%">Cộng tiền hàng</td><td class="r"><b>${fmtM(goods)}</b></td></tr>
+      <tr><td>Thuế suất thuế GTGT: <b style="margin-left:30%">${esc(rateTxt)}</b></td><td colspan="2"><b>Tiền thuế GTGT:</b></td><td class="r"><b>${fmtM(vat)}</b></td></tr>
+      <tr><td></td><td colspan="2">Tổng tiền thanh toán</td><td class="r"><b>${fmtM(goods + vat)}</b></td></tr></table>
+    <div class="words">Số tiền bằng chữ: <i>${esc(moneyWords(goods + vat))}</i></div>
+    <div class="words" style="margin-top:4px">Số chứng từ gốc kèm theo:</div><div>...</div>
+    <div class="datel">Ngày ..... tháng ..... năm ........</div>
+    <div class="sig">${(X ? ['Người nhận hàng', 'Người giao hàng', 'Thủ kho', 'Người lập phiếu'] : ['Người giao hàng', 'Người nhận hàng', 'Thủ kho', 'Người lập phiếu'])
+      .map((t) => `<div><b>${t}</b><br><i>(Ký, họ tên)</i></div>`).join('')}</div>
+    <script>window.onload=()=>window.print()<\/script></body></html>`;
+}
+
+function printVoucher(v) {
+  const w = window.open('', '_blank');
+  w.document.write(voucherPaperHtml(v));
   w.document.close();
 }
 

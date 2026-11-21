@@ -191,6 +191,15 @@ function setSetting(key, value) {
   db.prepare('INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
 }
 
+// Thông tin bổ sung cho mẫu phiếu xuất kho bán hàng
+for (const [table, col, def] of [
+  ['vouchers', 'tax_code', 'TEXT'], ['vouchers', 'contact', 'TEXT'], ['vouchers', 'phone', 'TEXT'],
+  ['vouchers', 'delivery_place', 'TEXT'], ['vouchers', 'salesperson', 'TEXT'], ['vouchers', 'warehouse', 'TEXT'],
+  ['voucher_lines', 'discount_rate', 'REAL NOT NULL DEFAULT 0'], ['voucher_lines', 'vat_rate', 'TEXT'], ['voucher_lines', 'vat_amount', 'REAL NOT NULL DEFAULT 0'],
+]) {
+  if (!db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+}
+
 // Tên đơn vị mặc định (đổi được trong Cài đặt)
 if (!getSetting('company_name')) setSetting('company_name', 'Kho hàng ETC MDA');
 

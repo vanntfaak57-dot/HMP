@@ -343,7 +343,7 @@ app.get('/api/vouchers', (req, res) => {
   if (isDate(req.query.to)) { where.push('v.date <= ?'); args.push(req.query.to); }
   if (req.query.q) { where.push('(v.number LIKE ? OR v.partner LIKE ? OR v.description LIKE ?)'); const q = `%${req.query.q}%`; args.push(q, q, q); }
   if (req.query.partner_id) { where.push('v.partner_id = ?'); args.push(Number(req.query.partner_id)); }
-  const rows = db.prepare(`SELECT v.*, (SELECT code FROM partners WHERE id = v.partner_id) partner_code, COALESCE(SUM(l.amount),0) total_amount, SUM(l.cost_amount) total_cost, COUNT(l.id) line_count,
+  const rows = db.prepare(`SELECT v.*, (SELECT code FROM partners WHERE id = v.partner_id) partner_code, COALESCE(SUM(l.amount),0) total_amount, COALESCE(SUM(l.vat_amount),0) total_vat, SUM(l.cost_amount) total_cost, COUNT(l.id) line_count,
       SUM(CASE WHEN l.cost_amount IS NULL THEN 1 ELSE 0 END) uncosted, p.status period_status, COALESCE(p.locked,0) locked
     FROM vouchers v LEFT JOIN voucher_lines l ON l.voucher_id = v.id LEFT JOIN periods p ON p.month = substr(v.date,1,7)
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''} GROUP BY v.id ORDER BY v.date DESC, v.id DESC LIMIT 2000`).all(...args);
@@ -386,25 +386,34 @@ function validateVoucher(b) {
   const lines = (b.lines || []).filter((l) => l && l.item_id);
   if (!lines.length) throw fail('Chứng từ phải có ít nhất một dòng hàng');
   const clean = lines.map((l, i) => {
-    const item = db.prepare('SELECT id, code FROM items WHERE id = ?').get(l.item_id);
+    const item = db.prepare('SELECT id, code, vat_rate FROM items WHERE id = ?').get(l.item_id);
     if (!item) throw fail(`Dòng ${i + 1}: mã hàng không tồn tại`);
     const qty = num(l.qty);
     if (qty <= 0) throw fail(`Dòng ${i + 1} (${item.code}): số lượng phải lớn hơn 0`);
     const price = num(l.unit_price);
-    const amount = l.amount !== undefined && l.amount !== '' && l.amount !== null ? Math.round(num(l.amount)) : Math.round(qty * price);
+    const discount_rate = num(l.discount_rate);
+    if (discount_rate < 0 || discount_rate > 100) throw fail(`Dòng ${i + 1} (${item.code}): tỷ lệ chiết khấu phải từ 0 đến 100%`);
+    const amount = l.amount !== undefined && l.amount !== '' && l.amount !== null ? Math.round(num(l.amount)) : Math.round(qty * price * (1 - discount_rate / 100));
     if (type === 'N' && amount < 0) throw fail(`Dòng ${i + 1}: giá trị nhập không hợp lệ`);
-    return { item_id: item.id, qty, unit_price: price, amount, sort: i };
+    let vat_rate;
+    try { vat_rate = l.vat_rate === undefined ? item.vat_rate : normVat(l.vat_rate); } catch (e) { throw fail(`Dòng ${i + 1} (${item.code}): ${e.message}`); }
+    const vat_amount = /^\d+$/.test(vat_rate || '') ? Math.round(amount * Number(vat_rate) / 100) : 0;
+    return { item_id: item.id, qty, unit_price: price, amount, discount_rate, vat_rate, vat_amount, sort: i };
   });
-  return { type, number, date: b.date, partner_id, partner: partnerName, address: b.address || '', description: b.description || '', ref_no: b.ref_no || '', source: b.source === 'pdf' ? 'pdf' : 'manual', attachment: safeAttachment(b.attachment), lines: clean };
+  return { type, number, date: b.date, partner_id, partner: partnerName, address: b.address || '', description: b.description || '', ref_no: b.ref_no || '', ...extraFields(b), source: b.source === 'pdf' ? 'pdf' : 'manual', attachment: safeAttachment(b.attachment), lines: clean };
 }
+// Các trường thông tin thêm trên phiếu (MST, người liên hệ, điện thoại, địa điểm giao hàng, NV bán hàng, mã kho)
+const EXTRA_FIELDS = ['tax_code', 'contact', 'phone', 'delivery_place', 'salesperson', 'warehouse'];
+function extraFields(b) { return Object.fromEntries(EXTRA_FIELDS.map((k) => [k, String(b[k] ?? '').trim().slice(0, 300)])); }
+function saveExtra(id, v) { db.prepare(`UPDATE vouchers SET ${EXTRA_FIELDS.map((k) => k + '=?').join(', ')} WHERE id = ?`).run(...EXTRA_FIELDS.map((k) => v[k]), id); }
 function safeAttachment(a) {
   if (!a) return null;
   const s = String(a);
   return /^[a-f0-9]{32}\.pdf$/.test(s) && fs.existsSync(path.join(UPLOAD_DIR, s)) ? s : null;
 }
 function insertLines(vid, lines) {
-  const st = db.prepare('INSERT INTO voucher_lines(voucher_id, item_id, qty, unit_price, amount, sort) VALUES (?,?,?,?,?,?)');
-  for (const l of lines) st.run(vid, l.item_id, l.qty, l.unit_price, l.amount, l.sort);
+  const st = db.prepare('INSERT INTO voucher_lines(voucher_id, item_id, qty, unit_price, amount, discount_rate, vat_rate, vat_amount, sort) VALUES (?,?,?,?,?,?,?,?,?)');
+  for (const l of lines) st.run(vid, l.item_id, l.qty, l.unit_price, l.amount, l.discount_rate, l.vat_rate, l.vat_amount, l.sort);
 }
 const summary = (v) => `${TYPE_NAME[v.type]} ${v.number} ngày ${v.date}, ${v.lines.length} dòng, tổng ${v.lines.reduce((s, l) => s + l.amount, 0).toLocaleString('vi-VN')}`;
 
@@ -415,6 +424,7 @@ app.post('/api/vouchers', canWrite, h((req, res) => {
     const r = db.prepare(`INSERT INTO vouchers(type, number, date, partner_id, partner, address, description, ref_no, source, attachment, created_by, created_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(v.type, v.number, v.date, v.partner_id, v.partner, v.address, v.description, v.ref_no, v.source, v.attachment, req.user.username, now());
     const id = Number(r.lastInsertRowid);
+    saveExtra(id, v);
     insertLines(id, v.lines);
     costing.checkNoNegative(v.lines.map((l) => l.item_id));
     costing.markDirty(v.date.slice(0, 7));
@@ -434,6 +444,7 @@ app.put('/api/vouchers/:id', canWrite, h((req, res) => {
   tx(() => {
     db.prepare(`UPDATE vouchers SET number=?, date=?, partner_id=?, partner=?, address=?, description=?, ref_no=?, attachment=?, updated_by=?, updated_at=? WHERE id=?`)
       .run(v.number, v.date, v.partner_id, v.partner, v.address, v.description, v.ref_no, v.attachment, req.user.username, now(), old.id);
+    saveExtra(old.id, v);
     db.prepare('DELETE FROM voucher_lines WHERE voucher_id = ?').run(old.id);
     insertLines(old.id, v.lines);
     costing.checkNoNegative([...v.lines.map((l) => l.item_id), ...old.lines.map((l) => l.item_id)]);

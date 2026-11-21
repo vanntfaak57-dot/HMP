@@ -65,12 +65,20 @@ const norm = (s) => String(s || '').normalize('NFC').toLowerCase().replace(/\s+/
 const near = (a, b) => Math.abs(a - b) <= Math.max(1, Math.abs(b) * 0.005);
 
 // Từ dãy số của một dòng hàng, tìm (số lượng, đơn giá, thành tiền) sao cho SL × ĐG ≈ TT
+  // Các số sau cột thành tiền: [tỷ lệ CK %, % thuế GTGT] (mẫu phiếu xuất kho bán hàng)
+  function tail(rest) {
+    const out = {};
+    const vat = rest.length ? rest[rest.length - 1] : null;
+    if (vat !== null && [0, 5, 8, 10].includes(vat)) out.vat_rate = String(vat);
+    if (rest.length >= 2 && rest[0] >= 0 && rest[0] <= 100) out.discount_rate = rest[0];
+    return out;
+  }
 function pickNumbers(nums) {
   for (let k = nums.length - 1; k >= 2; k--) {
     for (let j = k - 1; j >= 1; j--) {
       for (let i = j - 1; i >= 0; i--) {
         if (nums[i] > 0 && nums[j] > 0 && near(nums[i] * nums[j], nums[k])) {
-          return { qty: nums[i], unit_price: nums[j], amount: nums[k], sure: true };
+          return { qty: nums[i], unit_price: nums[j], amount: nums[k], sure: true, ...tail(nums.slice(k + 1)) };
         }
       }
     }
@@ -109,6 +117,15 @@ function parseText(text) {
       const m = raw.match(/(?:Mã\s*số\s*thuế|MST)\s*[:：]?\s*([0-9][0-9\- ]{8,15}[0-9])/i);
       if (m) result.tax_code = m[1].replace(/[\s]/g, '');
     }
+    if (partnerIdx >= 0 && li >= partnerIdx) {
+      const grab = (re) => { const m = raw.match(re); return m && m[1].trim() ? m[1].trim() : null; };
+      result.contact = result.contact || grab(/Tên\s*người\s*liên\s*hệ\s*[:：]\s*([^\t]+)/i);
+      result.phone = result.phone || grab(/Điện\s*thoại\s*[:：]\s*([0-9 .+\-()]{6,})/i);
+      result.delivery_place = result.delivery_place || grab(/Địa\s*điểm\s*giao\s*hàng\s*[:：]\s*([^\t]+)/i);
+      result.salesperson = result.salesperson || grab(/Nhân\s*viên\s*bán\s*hàng\s*[:：]\s*([^\t]+)/i);
+    }
+    if (!result.warehouse) { const m = raw.match(/Mã\s*kho\s*[:：]\s*([^\t]+)/i); if (m && m[1].trim()) result.warehouse = m[1].trim(); }
+    if (!result.ref_no) { const m = raw.match(/Số\s*phiếu\s*xuất\s*[:：]\s*([A-Za-z0-9][A-Za-z0-9\-\/._]*)/i); if (m) result.ref_no = m[1]; }
     // Địa chỉ của đối tượng: chỉ lấy dòng nằm sau tên khách hàng/NCC (dòng địa chỉ đầu phiếu là của đơn vị mình)
     if (!result.address && partnerIdx >= 0 && li >= partnerIdx) {
       const m = raw.match(/(?:Địa\s*chỉ(?:\s*\(bộ\s*phận\))?)\s*[:：]\s*([^\t]+)/i);
@@ -153,7 +170,7 @@ function parseText(text) {
     if (item) {
       const p = pickNumbers(nums);
       if (!p) { result.warnings.push(`Không đọc được số lượng của mã ${item.code}`); continue; }
-      result.lines.push({ item_id: item.id, code: item.code, name: item.name, unit: item.unit, qty: p.qty, unit_price: p.unit_price, amount: Math.round(p.amount), sure: p.sure });
+      result.lines.push({ item_id: item.id, code: item.code, name: item.name, unit: item.unit, qty: p.qty, unit_price: p.unit_price, amount: Math.round(p.amount), discount_rate: p.discount_rate || 0, vat_rate: p.vat_rate ?? item.vat_rate ?? null, sure: p.sure });
       if (!p.sure) result.warnings.push(`Mã ${item.code}: chưa khớp SL × Đơn giá = Thành tiền, vui lòng kiểm tra lại`);
     } else {
       // Dòng có dạng bảng hàng hóa nhưng mã chưa có trong danh mục

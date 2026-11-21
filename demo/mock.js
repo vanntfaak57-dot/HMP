@@ -238,9 +238,16 @@
   }
   const norm = (s) => String(s || '').normalize('NFC').toLowerCase().replace(/\s+/g, ' ').trim();
   const near = (a, b) => Math.abs(a - b) <= Math.max(1, Math.abs(b) * 0.005);
+  function tail(rest) {
+    const out = {};
+    const vat = rest.length ? rest[rest.length - 1] : null;
+    if (vat !== null && [0, 5, 8, 10].includes(vat)) out.vat_rate = String(vat);
+    if (rest.length >= 2 && rest[0] >= 0 && rest[0] <= 100) out.discount_rate = rest[0];
+    return out;
+  }
   function pickNumbers(nums) {
     for (let k = nums.length - 1; k >= 2; k--) for (let j = k - 1; j >= 1; j--) for (let i = j - 1; i >= 0; i--) {
-      if (nums[i] > 0 && nums[j] > 0 && near(nums[i] * nums[j], nums[k])) return { qty: nums[i], unit_price: nums[j], amount: nums[k], sure: true };
+      if (nums[i] > 0 && nums[j] > 0 && near(nums[i] * nums[j], nums[k])) return { qty: nums[i], unit_price: nums[j], amount: nums[k], sure: true, ...tail(nums.slice(k + 1)) };
     }
     if (nums.length >= 2) return { qty: nums[0], unit_price: nums[1], amount: nums[0] * nums[1], sure: false };
     if (nums.length === 1) return { qty: nums[0], unit_price: 0, amount: 0, sure: false };
@@ -266,6 +273,15 @@
         if (m && m[1].trim()) { result.partner = m[1].trim(); partnerIdx = li; }
       }
       if (!result.tax_code && partnerIdx >= 0 && li >= partnerIdx) { const m = raw.match(/(?:Mã\s*số\s*thuế|MST)\s*[:：]?\s*([0-9][0-9\- ]{8,15}[0-9])/i); if (m) result.tax_code = m[1].replace(/\s/g, ''); }
+      if (partnerIdx >= 0 && li >= partnerIdx) {
+        const grab = (re) => { const m = raw.match(re); return m && m[1].trim() ? m[1].trim() : null; };
+        result.contact = result.contact || grab(/Tên\s*người\s*liên\s*hệ\s*[:：]\s*([^\t]+)/i);
+        result.phone = result.phone || grab(/Điện\s*thoại\s*[:：]\s*([0-9 .+\-()]{6,})/i);
+        result.delivery_place = result.delivery_place || grab(/Địa\s*điểm\s*giao\s*hàng\s*[:：]\s*([^\t]+)/i);
+        result.salesperson = result.salesperson || grab(/Nhân\s*viên\s*bán\s*hàng\s*[:：]\s*([^\t]+)/i);
+      }
+      if (!result.warehouse) { const m = raw.match(/Mã\s*kho\s*[:：]\s*([^\t]+)/i); if (m && m[1].trim()) result.warehouse = m[1].trim(); }
+      if (!result.ref_no) { const m = raw.match(/Số\s*phiếu\s*xuất\s*[:：]\s*([A-Za-z0-9][A-Za-z0-9\-\/._]*)/i); if (m) result.ref_no = m[1]; }
       if (!result.address && partnerIdx >= 0 && li >= partnerIdx) { const m = raw.match(/(?:Địa\s*chỉ(?:\s*\(bộ\s*phận\))?)\s*[:：]\s*([^\t]+)/i); if (m && m[1].trim()) result.address = m[1].trim(); }
       if (!result.description) { const m = raw.match(/(?:Lý\s*do\s*(?:xuất|nhập)(?:\s*kho)?|Diễn\s*giải|Nội\s*dung)\s*[:：]\s*([^\t]+)/i); if (m && m[1].trim()) result.description = m[1].trim(); }
       if (!result.ref_no) { const m = raw.match(/(?:Số\s*hóa\s*đơn|Số\s*HĐ|Theo\s*hóa\s*đơn\s*số|Ký\s*hiệu)\s*[:：]?\s*([A-Za-z0-9\-\/]+)/i); if (m && /\d/.test(m[1])) result.ref_no = m[1]; }
@@ -287,7 +303,7 @@
       if (item) {
         const p = pickNumbers(nums);
         if (!p) { result.warnings.push(`Không đọc được số lượng của mã ${item.code}`); continue; }
-        result.lines.push({ item_id: item.id, code: item.code, name: item.name, unit: item.unit, qty: p.qty, unit_price: p.unit_price, amount: Math.round(p.amount), sure: p.sure });
+        result.lines.push({ item_id: item.id, code: item.code, name: item.name, unit: item.unit, qty: p.qty, unit_price: p.unit_price, amount: Math.round(p.amount), discount_rate: p.discount_rate || 0, vat_rate: p.vat_rate ?? item.vat_rate ?? null, sure: p.sure });
         if (!p.sure) result.warnings.push(`Mã ${item.code}: chưa khớp SL × Đơn giá = Thành tiền, vui lòng kiểm tra lại`);
       } else {
         const first = parseNumber(cells[0]);
@@ -344,11 +360,16 @@
       const qty = num(l.qty);
       if (qty <= 0) throw fail(`Dòng ${i + 1} (${item.code}): số lượng phải lớn hơn 0`);
       const price = num(l.unit_price);
-      const amount = l.amount !== undefined && l.amount !== '' && l.amount !== null ? Math.round(num(l.amount)) : Math.round(qty * price);
-      return { item_id: item.id, qty, unit_price: price, amount, sort: i };
+      const discount_rate = num(l.discount_rate);
+      if (discount_rate < 0 || discount_rate > 100) throw fail(`Dòng ${i + 1} (${item.code}): tỷ lệ chiết khấu phải từ 0 đến 100%`);
+      const amount = l.amount !== undefined && l.amount !== '' && l.amount !== null ? Math.round(num(l.amount)) : Math.round(qty * price * (1 - discount_rate / 100));
+      let vat_rate;
+      try { vat_rate = l.vat_rate === undefined ? (item.vat_rate ?? null) : normVat(l.vat_rate); } catch (e) { throw fail(`Dòng ${i + 1} (${item.code}): ${e.message}`); }
+      const vat_amount = /^\d+$/.test(vat_rate || '') ? Math.round(amount * Number(vat_rate) / 100) : 0;
+      return { item_id: item.id, qty, unit_price: price, amount, discount_rate, vat_rate, vat_amount, sort: i };
     });
     const att = b.attachment && ATT.has(b.attachment) ? b.attachment : (b.attachment || null);
-    return { type, number, date: b.date, partner_id, partner: partnerName, address: b.address || '', description: b.description || '', ref_no: b.ref_no || '', source: b.source === 'pdf' ? 'pdf' : 'manual', attachment: att, lines: clean };
+    return { type, number, date: b.date, partner_id, partner: partnerName, address: b.address || '', description: b.description || '', ref_no: b.ref_no || '', ...Object.fromEntries(['tax_code', 'contact', 'phone', 'delivery_place', 'salesperson', 'warehouse'].map((k) => [k, String(b[k] ?? '').trim().slice(0, 300)])), source: b.source === 'pdf' ? 'pdf' : 'manual', attachment: att, lines: clean };
   }
   const summary = (v) => `${TYPE_NAME[v.type]} ${v.number} ngày ${v.date}, ${v.lines.length} dòng, tổng ${v.lines.reduce((s, l) => s + l.amount, 0).toLocaleString('vi-VN')}`;
   const insertLines = (vid, lines) => lines.forEach((l) => D.lines.push({ id: nextId('lines'), voucher_id: vid, ...l, cost_price: null, cost_amount: null }));
@@ -570,7 +591,7 @@
       .sort((a, b) => cmp(b.date, a.date) || b.id - a.id)
       .map((v) => {
         const ls = D.lines.filter((l) => l.voucher_id === v.id); const p = period(v.date.slice(0, 7));
-        return { ...v, partner_code: D.partners.find((x) => x.id === v.partner_id)?.code || null, total_amount: ls.reduce((t, l) => t + l.amount, 0), total_cost: ls.reduce((t, l) => t + (l.cost_amount || 0), 0), line_count: ls.length,
+        return { ...v, partner_code: D.partners.find((x) => x.id === v.partner_id)?.code || null, total_amount: ls.reduce((t, l) => t + l.amount, 0), total_vat: ls.reduce((t, l) => t + (l.vat_amount || 0), 0), total_cost: ls.reduce((t, l) => t + (l.cost_amount || 0), 0), line_count: ls.length,
           uncosted: ls.filter((l) => l.cost_amount == null).length, period_status: p?.status || null, locked: p?.locked ? 1 : 0 };
       });
   });
