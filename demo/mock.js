@@ -2,7 +2,7 @@
 // Logic nghiệp vụ được chuyển nguyên từ server.js / src/*.js; dữ liệu lưu trong localStorage của trình duyệt.
 'use strict';
 (function () {
-  const DB_KEY = 'kho-demo-v1';
+  const DB_KEY = 'kho-demo-v2';
   const SID_KEY = 'kho-demo-sid';
   const EPS = 1e-9;
   let D = null;
@@ -16,6 +16,17 @@
   const isMonth = (s) => /^\d{4}-\d{2}$/.test(String(s || ''));
   const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
   const ci = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
+
+  // Thuế suất thuế GTGT: 0%, 5%, 8%, 10%, KCT (không chịu thuế), KKKNT (không kê khai, tính nộp thuế)
+  const VAT_RATES = ['0', '5', '8', '10', 'KCT', 'KKKNT'];
+  function normVat(v) {
+    if (v === undefined || v === null || String(v).trim() === '') return null;
+    let s = String(v).trim().toUpperCase().replace(/\s/g, '').replace('%', '').replace(',', '.');
+    if (/^0?\.\d+$/.test(s)) s = String(Math.round(Number(s) * 100)); // ô Excel định dạng % (0,1 = 10%)
+    else if (/^\d+(\.0+)?$/.test(s)) s = String(Number(s));
+    if (!VAT_RATES.includes(s)) throw fail(`Thuế suất GTGT "${v}" không hợp lệ. Chọn một trong: 0%, 5%, 8%, 10%, KCT, KKKNT`);
+    return s;
+  }
   const nextId = (t) => { D.seq[t] = (D.seq[t] || 0) + 1; return D.seq[t]; };
 
   function save() { try { localStorage.setItem(DB_KEY, JSON.stringify(D)); } catch { /* trình duyệt chặn lưu trữ */ } }
@@ -33,13 +44,13 @@
     mkUser('admin', 'Quản trị hệ thống', 'admin', 'admin123');
     mkUser('ketoan', 'Nguyễn Thu Hà', 'user', 'ketoan123');
     const items = [
-      ['VT001', 'Xi măng PCB40', 'Bao', 100, 8500000],
-      ['VT002', 'Thép cuộn D6', 'Kg', 500, 7500000],
-      ['VT003', 'Cát vàng', 'm3', 40, 12000000],
-      ['VT004', 'Đá 1x2', 'm3', 25, 8750000],
-      ['VT005', 'Gạch đặc A1', 'Viên', 5000, 6000000],
+      ['VT001', 'Xi măng PCB40', 'Bao', 100, 8500000, '8'],
+      ['VT002', 'Thép cuộn D6', 'Kg', 500, 7500000, '10'],
+      ['VT003', 'Cát vàng', 'm3', 40, 12000000, '10'],
+      ['VT004', 'Đá 1x2', 'm3', 25, 8750000, '10'],
+      ['VT005', 'Gạch đặc A1', 'Viên', 5000, 6000000, '8'],
     ];
-    for (const [code, name, unit, q, v] of items) D.items.push({ id: nextId('items'), code, name, unit, opening_qty: q, opening_value: v, note: '', created_at: '2026-09-30 08:00:00' });
+    for (const [code, name, unit, q, v, vat] of items) D.items.push({ id: nextId('items'), code, name, unit, vat_rate: vat, opening_qty: q, opening_value: v, note: '', created_at: '2026-09-30 08:00:00' });
     const id = (c) => D.items.find((i) => i.code === c).id;
     const V = (type, number, date, partner, description, lines) => {
       const vid = nextId('vouchers');
@@ -62,6 +73,7 @@
   function load() {
     try { const s = localStorage.getItem(DB_KEY); if (s) D = JSON.parse(s); } catch { D = null; }
     if (!D || !D.users) seed();
+    else D.items.forEach((i) => { if (i.vat_rate === undefined) i.vat_rate = null; });
   }
   function resetDemo() { try { localStorage.removeItem(DB_KEY); sessionStorage.removeItem(SID_KEY); } catch { /* bỏ qua */ } D = null; seed(); }
 
@@ -397,7 +409,7 @@
     if (D.items.some((i) => ci(i.code, String(b.code).trim()))) throw fail(`Mã hàng ${b.code} đã tồn tại`);
     if (num(b.opening_qty) || num(b.opening_value)) assertOpeningEditable();
     const id = nextId('items');
-    D.items.push({ id, code: String(b.code).trim(), name: String(b.name).trim(), unit: b.unit || '', opening_qty: num(b.opening_qty), opening_value: Math.round(num(b.opening_value)), note: b.note || '', created_at: now() });
+    D.items.push({ id, code: String(b.code).trim(), name: String(b.name).trim(), unit: b.unit || '', vat_rate: normVat(b.vat_rate), opening_qty: num(b.opening_qty), opening_value: Math.round(num(b.opening_value)), note: b.note || '', created_at: now() });
     if (num(b.opening_qty) || num(b.opening_value)) markDirty(firstMonth());
     audit(user, 'ITEM_CREATE', `${b.code} - ${b.name}`); return { id };
   }); });
@@ -405,12 +417,13 @@
     const it = D.items.find((i) => i.id === Number(params.id)); if (!it) throw fail('Không tìm thấy mã hàng', 404);
     if (D.items.some((i) => i.id !== it.id && ci(i.code, String(b.code).trim()))) throw fail(`Mã hàng ${b.code} đã tồn tại`);
     const oq = num(b.opening_qty), ov = Math.round(num(b.opening_value));
+    const vat = normVat(b.vat_rate);
     const changed = oq !== it.opening_qty || ov !== it.opening_value;
     if (changed) assertOpeningEditable();
     const old = { ...it };
-    Object.assign(it, { code: String(b.code).trim(), name: String(b.name).trim(), unit: b.unit || '', opening_qty: oq, opening_value: ov, note: b.note || '', updated_at: now() });
+    Object.assign(it, { code: String(b.code).trim(), name: String(b.name).trim(), unit: b.unit || '', vat_rate: vat, opening_qty: oq, opening_value: ov, note: b.note || '', updated_at: now() });
     if (changed) { checkNoNegative([it.id]); markDirty(firstMonth()); }
-    audit(user, 'ITEM_UPDATE', `${old.code}: ${JSON.stringify({ code: b.code, name: b.name, opening_qty: oq, opening_value: ov })} (cũ: SL ${old.opening_qty}, GT ${old.opening_value})`); return { ok: true };
+    audit(user, 'ITEM_UPDATE', `${old.code}: ${JSON.stringify({ code: b.code, name: b.name, vat_rate: vat, opening_qty: oq, opening_value: ov })} (cũ: thuế ${old.vat_rate ?? '-'}, SL ${old.opening_qty}, GT ${old.opening_value})`); return { ok: true };
   }); });
   R('DELETE', '/api/items/:id', ({ user, params }) => { W(user); return tx(() => {
     const it = D.items.find((i) => i.id === Number(params.id)); if (!it) throw fail('Không tìm thấy mã hàng', 404);
@@ -424,16 +437,17 @@
     const f = body.get('file'); if (!f) throw fail('Chưa chọn file');
     const wb = window.XLSX.read(await f.arrayBuffer(), { type: 'array' });
     const data = window.XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
-    const rows = data.slice(1).filter((r) => String(r[0] ?? '').trim()).map((r) => ({ code: String(r[0]).trim(), name: String(r[1] ?? '').trim(), unit: String(r[2] ?? '').trim(), qty: num(r[3]), value: Math.round(num(r[4])), note: String(r[5] ?? '').trim() }));
-    if (!rows.length) throw fail('File không có dữ liệu (dòng 1 là tiêu đề, từ dòng 2: Mã, Tên, ĐVT, SL tồn, Giá trị tồn, Ghi chú)');
+    const rows = data.slice(1).filter((r) => String(r[0] ?? '').trim()).map((r) => ({ code: String(r[0]).trim(), name: String(r[1] ?? '').trim(), unit: String(r[2] ?? '').trim(), qty: num(r[3]), value: Math.round(num(r[4])), note: String(r[5] ?? '').trim(), vat: r[6], line: data.indexOf(r) + 1 }));
+    if (!rows.length) throw fail('File không có dữ liệu (dòng 1 là tiêu đề, từ dòng 2: Mã, Tên, ĐVT, SL tồn, Giá trị tồn, Ghi chú, Thuế suất GTGT)');
+    for (const r of rows) { try { r.vat = normVat(r.vat); } catch (e) { throw fail(`Dòng ${r.line} (mã ${r.code}): ${e.message}`); } }
     assertOpeningEditable();
     let created = 0, updated = 0;
     tx(() => {
       for (const r of rows) {
         if (!r.name) throw fail(`Mã ${r.code} thiếu tên hàng`);
         const ex = D.items.find((i) => ci(i.code, r.code));
-        if (ex) { Object.assign(ex, { name: r.name, unit: r.unit, opening_qty: r.qty, opening_value: r.value, note: r.note, updated_at: now() }); updated++; }
-        else { D.items.push({ id: nextId('items'), code: r.code, name: r.name, unit: r.unit, opening_qty: r.qty, opening_value: r.value, note: r.note, created_at: now() }); created++; }
+        if (ex) { Object.assign(ex, { name: r.name, unit: r.unit, vat_rate: r.vat, opening_qty: r.qty, opening_value: r.value, note: r.note, updated_at: now() }); updated++; }
+        else { D.items.push({ id: nextId('items'), code: r.code, name: r.name, unit: r.unit, vat_rate: r.vat, opening_qty: r.qty, opening_value: r.value, note: r.note, created_at: now() }); created++; }
       }
       checkNoNegative(D.items.map((i) => i.id)); markDirty(firstMonth());
     });

@@ -31,6 +31,18 @@ const step = (s) => console.log('✔', s);
     const A = await ok('/api/items', { method: 'POST', body: { code: 'VT001', name: 'Xi măng PCB40', unit: 'Bao', opening_qty: 100, opening_value: 8500000 } });
     const C = await ok('/api/items', { method: 'POST', body: { code: 'VT002', name: 'Thép cuộn D6', unit: 'Kg', opening_qty: 3, opening_value: 1000 } });
     step('Tạo danh mục và số dư đầu kỳ');
+    const V = await ok('/api/items', { method: 'POST', body: { code: 'VT009', name: 'Gạch', unit: 'Viên', vat_rate: '10%' } });
+    assert.equal((await ok('/api/items')).find((i) => i.id === V.id).vat_rate, '10');
+    await ok(`/api/items/${V.id}`, { method: 'PUT', body: { code: 'VT009', name: 'Gạch', unit: 'Viên', vat_rate: 'KCT', opening_qty: 0, opening_value: 0 } });
+    assert.equal((await ok('/api/items')).find((i) => i.id === V.id).vat_rate, 'KCT');
+    assert.equal((await api('/api/items', { method: 'POST', body: { code: 'VT010', name: 'X', vat_rate: '7%' } })).status, 400);
+    const ExcelJS = require('exceljs'); const wbk = new ExcelJS.Workbook(); const wsx = wbk.addWorksheet('a');
+    wsx.addRow(['Mã', 'Tên', 'ĐVT', 'SL', 'GT', 'Ghi chú', 'Thuế']); wsx.addRow(['VT011', 'Sơn', 'Thùng', 0, 0, '', 0.08]); wsx.addRow(['VT012', 'Đinh', 'Kg', 0, 0, '', '5%']);
+    const fdx = new FormData(); fdx.append('file', new Blob([await wbk.xlsx.writeBuffer()]), 'dm.xlsx');
+    await ok('/api/items/import', { method: 'POST', body: fdx });
+    const all = await ok('/api/items');
+    assert.equal(all.find((i) => i.code === 'VT011').vat_rate, '8'); assert.equal(all.find((i) => i.code === 'VT012').vat_rate, '5');
+    step('Thuế suất GTGT: thêm/sửa, chặn giá trị sai, nhập từ Excel (0,08 → 8%, "5%" → 5%)');
 
     const r = await api('/api/vouchers', { method: 'POST', body: { type: 'N', date: '2026-09-30', lines: [{ item_id: A.id, qty: 1, unit_price: 1 }] } });
     assert.equal(r.status, 400); step('Chặn chứng từ có ngày <= ngày A');

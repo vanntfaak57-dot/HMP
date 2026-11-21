@@ -17,6 +17,9 @@ const ACTIONS = {
   USER_UPDATE: 'Sửa người dùng', SETTINGS_UPDATE: 'Sửa cài đặt', EXPORT: 'Xuất báo cáo',
 };
 
+const VAT_OPTIONS = [['', '-- Chưa chọn --'], ['0', '0%'], ['5', '5%'], ['8', '8%'], ['10', '10%'], ['KCT', 'KCT – Không chịu thuế'], ['KKKNT', 'KKKNT – Không kê khai, tính nộp thuế']];
+const vatLabel = (v) => (v == null || v === '' ? '' : /^\d+$/.test(v) ? v + '%' : v);
+
 let ME = null;
 let SETTINGS = {};
 
@@ -147,33 +150,37 @@ async function pageDashboard() {
 async function pageItems() {
   const items = await api('/api/items');
   let filter = '';
+  let vatFilter = '';
   const render = () => {
     const f = filter.toLowerCase();
-    const list = items.filter((i) => !f || i.code.toLowerCase().includes(f) || i.name.toLowerCase().includes(f));
+    const list = items.filter((i) => (!f || i.code.toLowerCase().includes(f) || i.name.toLowerCase().includes(f)) && (!vatFilter || (vatFilter === '-' ? !i.vat_rate : i.vat_rate === vatFilter)));
     const tq = list.reduce((s, i) => s + i.opening_value, 0);
     $('#items-body').innerHTML = list.map((i) => `<tr>
       <td>${esc(i.code)}</td><td>${esc(i.name)}</td><td>${esc(i.unit)}</td>
+      <td class="num">${i.vat_rate ? esc(vatLabel(i.vat_rate)) : '<span class="muted">—</span>'}</td>
       <td class="num">${fmtN(i.opening_qty, 3)}</td><td class="num">${fmtM(i.opening_value)}</td>
       <td class="num">${i.opening_qty ? fmtN(i.opening_value / i.opening_qty) : ''}</td>
       <td class="num">${fmtN(i.stock_qty, 3)}</td>
       <td>${canWrite() ? `<button class="btn small" data-edit="${i.id}">Sửa</button> <button class="btn small danger" data-del="${i.id}">Xóa</button>` : ''}</td></tr>`).join('')
-      || '<tr><td colspan="8" class="muted">Chưa có mã hàng</td></tr>';
-    $('#items-foot').innerHTML = `<tr><td colspan="4">Tổng cộng (${list.length} mã)</td><td class="num">${fmtM(tq)}</td><td colspan="3"></td></tr>`;
+      || '<tr><td colspan="9" class="muted">Chưa có mã hàng</td></tr>';
+    $('#items-foot').innerHTML = `<tr><td colspan="5">Tổng cộng (${list.length} mã)</td><td class="num">${fmtM(tq)}</td><td colspan="3"></td></tr>`;
   };
   $('#main').innerHTML = `
     <h1>Danh mục vật tư hàng hóa &amp; số dư đầu kỳ</h1>
     <div class="alert info">Số dư đầu kỳ là số lượng và giá trị tồn kho chốt tại <b>ngày A = ${fmtD(SETTINGS.opening_date) || '(chưa thiết lập)'}</b>. Chứng từ nhập/xuất phải có ngày sau ngày A.</div>
     <div class="toolbar">
       <input id="items-filter" placeholder="Tìm mã, tên hàng…" style="width:260px">
+      <select id="items-vat"><option value="">Mọi thuế suất</option>${VAT_OPTIONS.slice(1).map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}<option value="-">Chưa khai báo thuế suất</option></select>
       <span class="spacer"></span>
       ${canWrite() ? `<button class="btn primary" id="item-add">+ Thêm mã hàng</button>
       <a class="btn" href="/api/items/template.xlsx">Tải file Excel mẫu</a>
       <label class="btn">Nhập từ Excel<input type="file" id="item-import" accept=".xlsx" hidden></label>` : ''}
     </div>
-    <div class="table-wrap"><table><thead><tr><th>Mã hàng</th><th>Tên hàng</th><th>ĐVT</th><th class="num">SL tồn đầu</th><th class="num">Giá trị tồn đầu</th><th class="num">Đơn giá đầu kỳ</th><th class="num">SL tồn hiện tại</th><th></th></tr></thead>
+    <div class="table-wrap"><table><thead><tr><th>Mã hàng</th><th>Tên hàng</th><th>ĐVT</th><th class="num">Thuế suất GTGT</th><th class="num">SL tồn đầu</th><th class="num">Giá trị tồn đầu</th><th class="num">Đơn giá đầu kỳ</th><th class="num">SL tồn hiện tại</th><th></th></tr></thead>
     <tbody id="items-body"></tbody><tfoot id="items-foot"></tfoot></table></div>`;
   render();
   $('#items-filter').addEventListener('input', (e) => { filter = e.target.value; render(); });
+  $('#items-vat').addEventListener('change', (e) => { vatFilter = e.target.value; render(); });
   $('#main').addEventListener('click', async (e) => {
     const ed = e.target.closest('[data-edit]'), del = e.target.closest('[data-del]');
     if (ed) itemDialog(items.find((i) => i.id == ed.dataset.edit));
@@ -199,7 +206,8 @@ function itemDialog(it, onSaved) {
       <label class="wide">Tên hàng *<input name="name" required value="${esc(it?.name)}"></label>
       <label>SL tồn đầu kỳ<input name="opening_qty" type="number" step="any" value="${it?.opening_qty ?? 0}"></label>
       <label>Giá trị tồn đầu kỳ<input name="opening_value" type="number" step="any" value="${it?.opening_value ?? 0}"></label>
-      <label class="wide">Ghi chú<input name="note" value="${esc(it?.note)}"></label>
+      <label>Thuế suất thuế GTGT<select name="vat_rate">${VAT_OPTIONS.map(([v, t]) => `<option value="${v}" ${(it?.vat_rate ?? '') === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+      <label>Ghi chú<input name="note" value="${esc(it?.note)}"></label>
     </form>
     <div class="actions"><button class="btn" data-close>Hủy</button><button class="btn primary" id="item-save">Lưu</button></div>`, (bg, close) => {
     $('#item-save', bg).addEventListener('click', async () => {

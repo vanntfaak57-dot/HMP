@@ -34,9 +34,10 @@ function showPaper(html) {
 function showColumns() {
   modal(`<h2>Định dạng file Excel danh mục &amp; tồn đầu</h2>
     <p>Dòng 1 là tiêu đề, dữ liệu từ dòng 2, theo đúng thứ tự cột:</p>
-    <div class="table-wrap"><table><tr><th>A</th><th>B</th><th>C</th><th>D</th><th>E</th><th>F</th></tr>
-    <tr><td>Mã hàng</td><td>Tên hàng</td><td>ĐVT</td><td>SL tồn đầu kỳ</td><td>Giá trị tồn đầu kỳ</td><td>Ghi chú</td></tr>
-    <tr><td>VT001</td><td>Xi măng PCB40</td><td>Bao</td><td>100</td><td>8500000</td><td></td></tr></table></div>
+    <div class="table-wrap"><table><tr><th>A</th><th>B</th><th>C</th><th>D</th><th>E</th><th>F</th><th>G</th></tr>
+    <tr><td>Mã hàng</td><td>Tên hàng</td><td>ĐVT</td><td>SL tồn đầu kỳ</td><td>Giá trị tồn đầu kỳ</td><td>Ghi chú</td><td>Thuế suất GTGT</td></tr>
+    <tr><td>VT001</td><td>Xi măng PCB40</td><td>Bao</td><td>100</td><td>8500000</td><td></td><td>8%</td></tr></table></div>
+    <p class="muted">Thuế suất GTGT nhận: 0%, 5%, 8%, 10%, KCT (không chịu thuế), KKKNT (không kê khai, tính nộp thuế); để trống nếu chưa xác định.</p>
     <p class="muted">Mã đã có sẽ được cập nhật, mã mới sẽ được thêm.</p><div class="actions"><button class="btn primary" data-close>Đã hiểu</button></div>`);
 }
 // Xem PDF gốc đính kèm

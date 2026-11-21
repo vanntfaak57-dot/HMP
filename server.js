@@ -42,6 +42,17 @@ const isMonth = (s) => /^\d{4}-\d{2}$/.test(String(s || ''));
 const canWrite = requireRole('admin', 'user');
 const adminOnly = requireRole('admin');
 
+// Thuế suất thuế GTGT: 0%, 5%, 8%, 10%, KCT (không chịu thuế), KKKNT (không kê khai, tính nộp thuế)
+const VAT_RATES = ['0', '5', '8', '10', 'KCT', 'KKKNT'];
+function normVat(v) {
+  if (v === undefined || v === null || String(v).trim() === '') return null;
+  let s = String(v).trim().toUpperCase().replace(/\s/g, '').replace('%', '').replace(',', '.');
+  if (/^0?\.\d+$/.test(s)) s = String(Math.round(Number(s) * 100)); // ô Excel định dạng % (0,1 = 10%)
+  else if (/^\d+(\.0+)?$/.test(s)) s = String(Number(s));
+  if (!VAT_RATES.includes(s)) throw fail(`Thuế suất GTGT "${v}" không hợp lệ. Chọn một trong: 0%, 5%, 8%, 10%, KCT, KKKNT`);
+  return s;
+}
+
 // ---------------- Đăng nhập ----------------
 app.post('/api/login', h(auth.login));
 app.use('/api', requireAuth);
@@ -96,10 +107,10 @@ app.post('/api/items', canWrite, h((req, res) => {
   const b = req.body || {};
   if (!b.code || !b.name) throw fail('Mã và tên hàng là bắt buộc');
   if (num(b.opening_qty) || num(b.opening_value)) assertOpeningEditable();
-  const r = db.prepare('INSERT INTO items(code, name, unit, opening_qty, opening_value, note, created_at) VALUES (?,?,?,?,?,?,?)')
-    .run(String(b.code).trim(), String(b.name).trim(), b.unit || '', num(b.opening_qty), Math.round(num(b.opening_value)), b.note || '', now());
+  const r = db.prepare('INSERT INTO items(code, name, unit, vat_rate, opening_qty, opening_value, note, created_at) VALUES (?,?,?,?,?,?,?,?)')
+    .run(String(b.code).trim(), String(b.name).trim(), b.unit || '', normVat(b.vat_rate), num(b.opening_qty), Math.round(num(b.opening_value)), b.note || '', now());
   if (num(b.opening_qty) || num(b.opening_value)) costing.markDirty(costing.firstMonth() || '0000-00');
-  audit(req, 'ITEM_CREATE', `${b.code} - ${b.name}`);
+  audit(req, 'ITEM_CREATE', `${b.code} - ${b.name}${b.vat_rate ? `, thuế GTGT ${b.vat_rate}` : ''}`);
   res.json({ id: Number(r.lastInsertRowid) });
 }));
 app.put('/api/items/:id', canWrite, h((req, res) => {
@@ -107,14 +118,15 @@ app.put('/api/items/:id', canWrite, h((req, res) => {
   const it = db.prepare('SELECT * FROM items WHERE id = ?').get(req.params.id);
   if (!it) throw fail('Không tìm thấy mã hàng', 404);
   const oq = num(b.opening_qty), ov = Math.round(num(b.opening_value));
+  const vat = normVat(b.vat_rate);
   const openingChanged = oq !== it.opening_qty || ov !== it.opening_value;
   if (openingChanged) assertOpeningEditable();
   tx(() => {
-    db.prepare('UPDATE items SET code=?, name=?, unit=?, opening_qty=?, opening_value=?, note=?, updated_at=? WHERE id=?')
-      .run(String(b.code).trim(), String(b.name).trim(), b.unit || '', oq, ov, b.note || '', now(), it.id);
+    db.prepare('UPDATE items SET code=?, name=?, unit=?, vat_rate=?, opening_qty=?, opening_value=?, note=?, updated_at=? WHERE id=?')
+      .run(String(b.code).trim(), String(b.name).trim(), b.unit || '', vat, oq, ov, b.note || '', now(), it.id);
     if (openingChanged) { costing.checkNoNegative([it.id]); costing.markDirty(costing.firstMonth() || '0000-00'); }
   });
-  audit(req, 'ITEM_UPDATE', `${it.code}: ${JSON.stringify({ code: b.code, name: b.name, opening_qty: oq, opening_value: ov })} (cũ: SL ${it.opening_qty}, GT ${it.opening_value})`);
+  audit(req, 'ITEM_UPDATE', `${it.code}: ${JSON.stringify({ code: b.code, name: b.name, vat_rate: vat, opening_qty: oq, opening_value: ov })} (cũ: thuế ${it.vat_rate ?? '-'}, SL ${it.opening_qty}, GT ${it.opening_value})`);
   res.json({ ok: true });
 }));
 app.delete('/api/items/:id', canWrite, h((req, res) => {
@@ -136,8 +148,9 @@ app.get('/api/items/template.xlsx', h(async (req, res) => {
     { header: 'Mã hàng', key: 'code', width: 15 }, { header: 'Tên hàng', key: 'name', width: 40 },
     { header: 'ĐVT', key: 'unit', width: 10 }, { header: 'SL tồn đầu kỳ', key: 'qty', width: 15 },
     { header: 'Giá trị tồn đầu kỳ', key: 'val', width: 20 }, { header: 'Ghi chú', key: 'note', width: 25 },
+    { header: 'Thuế suất GTGT (0%, 5%, 8%, 10%, KCT, KKKNT)', key: 'vat', width: 22 },
   ];
-  ws.addRow({ code: 'VT001', name: 'Xi măng PCB40', unit: 'Bao', qty: 100, val: 8500000 });
+  ws.addRow({ code: 'VT001', name: 'Xi măng PCB40', unit: 'Bao', qty: 100, val: 8500000, vat: '10%' });
   ws.getRow(1).font = { bold: true };
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', 'attachment; filename="mau_danh_muc_ton_dau.xlsx"');
@@ -157,9 +170,10 @@ app.post('/api/items/import', canWrite, upload.single('file'), h(async (req, res
     const code = String(val(row.getCell(1)) ?? '').trim();
     if (!code) return;
     rows.push({ code, name: String(val(row.getCell(2)) ?? '').trim(), unit: String(val(row.getCell(3)) ?? '').trim(),
-      qty: num(val(row.getCell(4))), value: Math.round(num(val(row.getCell(5)))), note: String(val(row.getCell(6)) ?? '').trim() });
+      qty: num(val(row.getCell(4))), value: Math.round(num(val(row.getCell(5)))), note: String(val(row.getCell(6)) ?? '').trim(), vat: val(row.getCell(7)), line: i });
   });
-  if (!rows.length) throw fail('File không có dữ liệu (dòng 1 là tiêu đề, từ dòng 2: Mã, Tên, ĐVT, SL tồn, Giá trị tồn, Ghi chú)');
+  if (!rows.length) throw fail('File không có dữ liệu (dòng 1 là tiêu đề, từ dòng 2: Mã, Tên, ĐVT, SL tồn, Giá trị tồn, Ghi chú, Thuế suất GTGT)');
+  for (const r of rows) { try { r.vat = normVat(r.vat); } catch (e) { throw fail(`Dòng ${r.line} (mã ${r.code}): ${e.message}`); } }
   assertOpeningEditable();
   let created = 0, updated = 0;
   tx(() => {
@@ -167,10 +181,10 @@ app.post('/api/items/import', canWrite, upload.single('file'), h(async (req, res
       if (!r.name) throw fail(`Mã ${r.code} thiếu tên hàng`);
       const ex = db.prepare('SELECT id FROM items WHERE code = ?').get(r.code);
       if (ex) {
-        db.prepare('UPDATE items SET name=?, unit=?, opening_qty=?, opening_value=?, note=?, updated_at=? WHERE id=?').run(r.name, r.unit, r.qty, r.value, r.note, now(), ex.id);
+        db.prepare('UPDATE items SET name=?, unit=?, vat_rate=?, opening_qty=?, opening_value=?, note=?, updated_at=? WHERE id=?').run(r.name, r.unit, r.vat, r.qty, r.value, r.note, now(), ex.id);
         updated++;
       } else {
-        db.prepare('INSERT INTO items(code, name, unit, opening_qty, opening_value, note, created_at) VALUES (?,?,?,?,?,?,?)').run(r.code, r.name, r.unit, r.qty, r.value, r.note, now());
+        db.prepare('INSERT INTO items(code, name, unit, vat_rate, opening_qty, opening_value, note, created_at) VALUES (?,?,?,?,?,?,?,?)').run(r.code, r.name, r.unit, r.vat, r.qty, r.value, r.note, now());
         created++;
       }
     }

@@ -107,6 +107,11 @@ CREATE TABLE IF NOT EXISTS periods (
 );
 `);
 
+// Nâng cấp CSDL cũ: thêm cột thuế suất GTGT nếu chưa có
+if (!db.prepare('PRAGMA table_info(items)').all().some((c) => c.name === 'vat_rate')) {
+  db.exec('ALTER TABLE items ADD COLUMN vat_rate TEXT');
+}
+
 function now() {
   const d = new Date();
   const p = (n) => String(n).padStart(2, '0');
