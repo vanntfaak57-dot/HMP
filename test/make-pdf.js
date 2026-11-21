@@ -10,6 +10,7 @@ const out = process.argv[2];
   <div style="text-align:center">Ngày 15 tháng 10 năm 2026</div>
   <div style="text-align:right">Số: XK-PDF-0015</div>
   <p>Họ và tên người nhận hàng: Công ty CP Xây dựng Minh Phát</p>
+  <p>Mã số thuế: 0101234567</p>
   <p>Lý do xuất kho: Xuất bán theo hợp đồng 12/HĐ</p>
   <table border="1" cellspacing="0" cellpadding="6" style="width:100%;border-collapse:collapse">
    <tr><th>STT</th><th>Tên hàng</th><th>Mã số</th><th>ĐVT</th><th>SL yêu cầu</th><th>SL thực xuất</th><th>Đơn giá</th><th>Thành tiền</th></tr>

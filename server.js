@@ -12,6 +12,7 @@ const auth = require('./src/auth');
 const { audit, requireAuth, requireRole } = auth;
 const costing = require('./src/costing');
 const { parsePdf } = require('./src/pdfparser');
+const analytics = require('./src/analytics');
 
 auth.ensureAdmin();
 
@@ -218,6 +219,132 @@ app.post('/api/items/import', canWrite, upload.single('file'), h(async (req, res
   res.json({ created, updated });
 }));
 
+
+// ---------------- Danh mục khách hàng & nhà cung cấp ----------------
+function cleanPartner(b) {
+  const code = String(b.code || '').trim(), name = String(b.name || '').trim();
+  if (!code || !name) throw fail('Mã và tên đối tượng là bắt buộc');
+  const is_customer = b.is_customer === true || b.is_customer === 1 || b.is_customer === '1' || b.is_customer === 'on' ? 1 : 0;
+  const is_supplier = b.is_supplier === true || b.is_supplier === 1 || b.is_supplier === '1' || b.is_supplier === 'on' ? 1 : 0;
+  if (!is_customer && !is_supplier) throw fail(`Đối tượng ${code}: chọn ít nhất một loại (Khách hàng hoặc Nhà cung cấp)`);
+  const s = (k, n = 300) => String(b[k] ?? '').trim().slice(0, n);
+  return { code, name, is_customer, is_supplier, tax_code: s('tax_code', 20), address: s('address'), phone: s('phone', 50), email: s('email', 100), contact: s('contact', 100), note: s('note') };
+}
+// Loại đối tượng từ chữ: "KH", "NCC", "KH,NCC", "Khách hàng", "Nhà cung cấp", "Cả hai"
+function parseKind(t) {
+  const s = String(t || '').toUpperCase().normalize('NFC');
+  const both = /CẢ|CA HAI|BOTH/.test(s);
+  return { is_customer: both || /KH|KHÁCH/.test(s) ? 1 : 0, is_supplier: both || /NCC|CUNG CẤP|CUNG CAP/.test(s) ? 1 : 0 };
+}
+const partnerLabel = (p) => [p.is_customer ? 'KH' : '', p.is_supplier ? 'NCC' : ''].filter(Boolean).join(', ');
+
+app.get('/api/partners', (req, res) => {
+  const where = [];
+  if (req.query.kind === 'KH') where.push('p.is_customer = 1');
+  if (req.query.kind === 'NCC') where.push('p.is_supplier = 1');
+  res.json(db.prepare(`SELECT p.*, (SELECT COUNT(*) FROM vouchers v WHERE v.partner_id = p.id) voucher_count
+    FROM partners p ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY p.code`).all());
+});
+app.post('/api/partners', canWrite, h((req, res) => {
+  const p = cleanPartner(req.body || {});
+  if (db.prepare('SELECT id FROM partners WHERE code = ?').get(p.code)) throw fail(`Mã đối tượng ${p.code} đã tồn tại`);
+  const r = db.prepare('INSERT INTO partners(code, name, is_customer, is_supplier, tax_code, address, phone, email, contact, note, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+    .run(p.code, p.name, p.is_customer, p.is_supplier, p.tax_code, p.address, p.phone, p.email, p.contact, p.note, now());
+  audit(req, 'PARTNER_CREATE', `${p.code} - ${p.name} (${partnerLabel(p)})`);
+  res.json({ id: Number(r.lastInsertRowid) });
+}));
+app.put('/api/partners/:id', canWrite, h((req, res) => {
+  const old = db.prepare('SELECT * FROM partners WHERE id = ?').get(req.params.id);
+  if (!old) throw fail('Không tìm thấy đối tượng', 404);
+  const p = cleanPartner(req.body || {});
+  if (db.prepare('SELECT id FROM partners WHERE code = ? AND id <> ?').get(p.code, old.id)) throw fail(`Mã đối tượng ${p.code} đã tồn tại`);
+  db.prepare('UPDATE partners SET code=?, name=?, is_customer=?, is_supplier=?, tax_code=?, address=?, phone=?, email=?, contact=?, note=?, updated_at=? WHERE id=?')
+    .run(p.code, p.name, p.is_customer, p.is_supplier, p.tax_code, p.address, p.phone, p.email, p.contact, p.note, now(), old.id);
+  audit(req, 'PARTNER_UPDATE', `${old.code}: ${JSON.stringify(p)}`);
+  res.json({ ok: true });
+}));
+app.post('/api/partners/bulk-delete', canWrite, h((req, res) => {
+  const ids = [...new Set((req.body?.ids || []).map(Number).filter(Number.isInteger))];
+  if (!ids.length) throw fail('Chưa chọn đối tượng nào');
+  const deleted = [], skipped = [];
+  tx(() => {
+    for (const id of ids) {
+      const p = db.prepare('SELECT * FROM partners WHERE id = ?').get(id);
+      if (!p) { skipped.push({ code: `#${id}`, reason: 'Không còn tồn tại' }); continue; }
+      const n = db.prepare('SELECT COUNT(*) c FROM vouchers WHERE partner_id = ?').get(id).c;
+      if (n) { skipped.push({ code: p.code, name: p.name, reason: `Đã có ${n} chứng từ` }); continue; }
+      db.prepare('DELETE FROM partners WHERE id = ?').run(id);
+      deleted.push(p.code);
+    }
+  });
+  audit(req, 'PARTNER_DELETE', `Xóa ${deleted.length} đối tượng: ${deleted.join(', ') || '(không có)'}${skipped.length ? ` | bỏ qua: ${skipped.map((s) => `${s.code} (${s.reason})`).join(', ')}` : ''}`);
+  res.json({ deleted, skipped });
+}));
+app.get('/api/partners/template.xlsx', h(async (req, res) => {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('DoiTuong');
+  ws.columns = [
+    { header: 'Mã đối tượng', width: 15 }, { header: 'Tên đối tượng', width: 40 }, { header: 'Loại (KH / NCC / KH,NCC)', width: 18 },
+    { header: 'Mã số thuế', width: 15 }, { header: 'Địa chỉ', width: 40 }, { header: 'Điện thoại', width: 15 },
+    { header: 'Email', width: 25 }, { header: 'Người liên hệ', width: 20 }, { header: 'Ghi chú', width: 25 },
+  ];
+  ws.addRow(['KH001', 'Công ty CP Xây dựng Minh Phát', 'KH', '0101234567', '12 Láng Hạ, Hà Nội', '0912345678', '', 'Anh Tuấn', '']);
+  ws.addRow(['NCC001', 'Công ty Xi măng Hà Tiên', 'NCC', '0300000001', 'TP. Hồ Chí Minh', '', '', '', '']);
+  ws.getRow(1).font = { bold: true };
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename="mau_khach_hang_nha_cung_cap.xlsx"');
+  await wb.xlsx.write(res);
+  res.end();
+}));
+app.post('/api/partners/import', canWrite, upload.single('file'), h(async (req, res) => {
+  if (!req.file) throw fail('Chưa chọn file');
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(req.file.buffer);
+  const ws = wb.worksheets[0];
+  const val = (c) => { const v = c.value; if (v && typeof v === 'object') return v.result ?? v.text ?? (v.richText ? v.richText.map((t) => t.text).join('') : ''); return v ?? ''; };
+  const rows = [];
+  ws.eachRow((row, i) => {
+    if (i === 1) return;
+    const cells = Array.from({ length: 9 }, (_, k) => String(val(row.getCell(k + 1))).trim());
+    if (!cells[0]) return;
+    let p;
+    try { p = cleanPartner({ code: cells[0], name: cells[1], ...parseKind(cells[2]), tax_code: cells[3], address: cells[4], phone: cells[5], email: cells[6], contact: cells[7], note: cells[8] }); }
+    catch (e) { throw fail(`Dòng ${i}: ${e.message}`); }
+    rows.push(p);
+  });
+  if (!rows.length) throw fail('File không có dữ liệu (dòng 1 là tiêu đề, từ dòng 2: Mã, Tên, Loại, MST, Địa chỉ, Điện thoại, Email, Người liên hệ, Ghi chú)');
+  let created = 0, updated = 0;
+  tx(() => {
+    for (const p of rows) {
+      const ex = db.prepare('SELECT id FROM partners WHERE code = ?').get(p.code);
+      if (ex) {
+        db.prepare('UPDATE partners SET name=?, is_customer=?, is_supplier=?, tax_code=?, address=?, phone=?, email=?, contact=?, note=?, updated_at=? WHERE id=?')
+          .run(p.name, p.is_customer, p.is_supplier, p.tax_code, p.address, p.phone, p.email, p.contact, p.note, now(), ex.id);
+        updated++;
+      } else {
+        db.prepare('INSERT INTO partners(code, name, is_customer, is_supplier, tax_code, address, phone, email, contact, note, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+          .run(p.code, p.name, p.is_customer, p.is_supplier, p.tax_code, p.address, p.phone, p.email, p.contact, p.note, now());
+        created++;
+      }
+    }
+  });
+  audit(req, 'PARTNER_IMPORT', `Nhập Excel đối tượng: thêm ${created}, cập nhật ${updated}`);
+  res.json({ created, updated });
+}));
+
+// Tìm đối tượng khớp với nội dung PDF: ưu tiên mã số thuế, sau đó tên
+function matchPartner(type, taxCode, name) {
+  const col = type === 'N' ? 'is_supplier' : 'is_customer';
+  const digits = String(taxCode || '').replace(/\D/g, '');
+  if (digits) {
+    const p = db.prepare(`SELECT * FROM partners WHERE replace(replace(tax_code,'-',''),' ','') = ?`).get(digits);
+    if (p) return p;
+  }
+  const n = String(name || '').normalize('NFC').toLowerCase().replace(/\s+/g, ' ').trim();
+  if (!n) return null;
+  return db.prepare(`SELECT * FROM partners ORDER BY ${col} DESC`).all().find((p) => p.name.normalize('NFC').toLowerCase().replace(/\s+/g, ' ').trim() === n) || null;
+}
+
 // ---------------- Chứng từ nhập / xuất ----------------
 const TYPE_NAME = { N: 'Phiếu nhập kho', X: 'Phiếu xuất kho bán hàng' };
 const PREFIX = { N: 'NK', X: 'XK' };
@@ -236,7 +363,8 @@ app.get('/api/vouchers', (req, res) => {
   if (isDate(req.query.from)) { where.push('v.date >= ?'); args.push(req.query.from); }
   if (isDate(req.query.to)) { where.push('v.date <= ?'); args.push(req.query.to); }
   if (req.query.q) { where.push('(v.number LIKE ? OR v.partner LIKE ? OR v.description LIKE ?)'); const q = `%${req.query.q}%`; args.push(q, q, q); }
-  const rows = db.prepare(`SELECT v.*, COALESCE(SUM(l.amount),0) total_amount, SUM(l.cost_amount) total_cost, COUNT(l.id) line_count,
+  if (req.query.partner_id) { where.push('v.partner_id = ?'); args.push(Number(req.query.partner_id)); }
+  const rows = db.prepare(`SELECT v.*, (SELECT code FROM partners WHERE id = v.partner_id) partner_code, COALESCE(SUM(l.amount),0) total_amount, SUM(l.cost_amount) total_cost, COUNT(l.id) line_count,
       SUM(CASE WHEN l.cost_amount IS NULL THEN 1 ELSE 0 END) uncosted, p.status period_status, COALESCE(p.locked,0) locked
     FROM vouchers v LEFT JOIN voucher_lines l ON l.voucher_id = v.id LEFT JOIN periods p ON p.month = substr(v.date,1,7)
     ${where.length ? 'WHERE ' + where.join(' AND ') : ''} GROUP BY v.id ORDER BY v.date DESC, v.id DESC LIMIT 2000`).all(...args);
@@ -244,7 +372,7 @@ app.get('/api/vouchers', (req, res) => {
 });
 
 function getVoucher(id) {
-  const v = db.prepare(`SELECT v.*, p.status period_status, COALESCE(p.locked,0) locked FROM vouchers v
+  const v = db.prepare(`SELECT v.*, (SELECT code FROM partners WHERE id = v.partner_id) partner_code, p.status period_status, COALESCE(p.locked,0) locked FROM vouchers v
     LEFT JOIN periods p ON p.month = substr(v.date,1,7) WHERE v.id = ?`).get(id);
   if (!v) return null;
   v.lines = db.prepare(`SELECT l.*, i.code, i.name, i.unit FROM voucher_lines l JOIN items i ON i.id = l.item_id
@@ -266,6 +394,16 @@ function validateVoucher(b) {
   if (b.date <= A) throw fail(`Ngày chứng từ phải sau ngày chốt số dư ${A}`);
   if (costing.isLocked(b.date.slice(0, 7))) throw fail(`Kỳ ${b.date.slice(0, 7)} đã khóa sổ`);
   const number = String(b.number || '').trim() || nextNumber(type);
+  let partner_id = null;
+  let partnerName = String(b.partner || '').trim();
+  if (b.partner_id) {
+    const p = db.prepare('SELECT * FROM partners WHERE id = ?').get(Number(b.partner_id));
+    if (!p) throw fail('Đối tượng không tồn tại trong danh mục');
+    if (type === 'X' && !p.is_customer) throw fail(`${p.code} - ${p.name} không phải khách hàng. Sửa loại đối tượng trong danh mục hoặc chọn đối tượng khác.`);
+    if (type === 'N' && !p.is_supplier) throw fail(`${p.code} - ${p.name} không phải nhà cung cấp. Sửa loại đối tượng trong danh mục hoặc chọn đối tượng khác.`);
+    partner_id = p.id;
+    if (!partnerName) partnerName = p.name;
+  }
   const lines = (b.lines || []).filter((l) => l && l.item_id);
   if (!lines.length) throw fail('Chứng từ phải có ít nhất một dòng hàng');
   const clean = lines.map((l, i) => {
@@ -278,7 +416,7 @@ function validateVoucher(b) {
     if (type === 'N' && amount < 0) throw fail(`Dòng ${i + 1}: giá trị nhập không hợp lệ`);
     return { item_id: item.id, qty, unit_price: price, amount, sort: i };
   });
-  return { type, number, date: b.date, partner: b.partner || '', address: b.address || '', description: b.description || '', ref_no: b.ref_no || '', source: b.source === 'pdf' ? 'pdf' : 'manual', attachment: safeAttachment(b.attachment), lines: clean };
+  return { type, number, date: b.date, partner_id, partner: partnerName, address: b.address || '', description: b.description || '', ref_no: b.ref_no || '', source: b.source === 'pdf' ? 'pdf' : 'manual', attachment: safeAttachment(b.attachment), lines: clean };
 }
 function safeAttachment(a) {
   if (!a) return null;
@@ -295,8 +433,8 @@ app.post('/api/vouchers', canWrite, h((req, res) => {
   const v = validateVoucher(req.body || {});
   if (db.prepare('SELECT id FROM vouchers WHERE type = ? AND number = ?').get(v.type, v.number)) throw fail(`Số phiếu ${v.number} đã tồn tại`);
   const id = tx(() => {
-    const r = db.prepare(`INSERT INTO vouchers(type, number, date, partner, address, description, ref_no, source, attachment, created_by, created_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(v.type, v.number, v.date, v.partner, v.address, v.description, v.ref_no, v.source, v.attachment, req.user.username, now());
+    const r = db.prepare(`INSERT INTO vouchers(type, number, date, partner_id, partner, address, description, ref_no, source, attachment, created_by, created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(v.type, v.number, v.date, v.partner_id, v.partner, v.address, v.description, v.ref_no, v.source, v.attachment, req.user.username, now());
     const id = Number(r.lastInsertRowid);
     insertLines(id, v.lines);
     costing.checkNoNegative(v.lines.map((l) => l.item_id));
@@ -315,8 +453,8 @@ app.put('/api/vouchers/:id', canWrite, h((req, res) => {
   const dup = db.prepare('SELECT id FROM vouchers WHERE type = ? AND number = ? AND id <> ?').get(v.type, v.number, old.id);
   if (dup) throw fail(`Số phiếu ${v.number} đã tồn tại`);
   tx(() => {
-    db.prepare(`UPDATE vouchers SET number=?, date=?, partner=?, address=?, description=?, ref_no=?, attachment=?, updated_by=?, updated_at=? WHERE id=?`)
-      .run(v.number, v.date, v.partner, v.address, v.description, v.ref_no, v.attachment, req.user.username, now(), old.id);
+    db.prepare(`UPDATE vouchers SET number=?, date=?, partner_id=?, partner=?, address=?, description=?, ref_no=?, attachment=?, updated_by=?, updated_at=? WHERE id=?`)
+      .run(v.number, v.date, v.partner_id, v.partner, v.address, v.description, v.ref_no, v.attachment, req.user.username, now(), old.id);
     db.prepare('DELETE FROM voucher_lines WHERE voucher_id = ?').run(old.id);
     insertLines(old.id, v.lines);
     costing.checkNoNegative([...v.lines.map((l) => l.item_id), ...old.lines.map((l) => l.item_id)]);
@@ -347,6 +485,11 @@ app.post('/api/pdf/parse', canWrite, upload.single('file'), h(async (req, res) =
   fs.writeFileSync(path.join(UPLOAD_DIR, name), req.file.buffer);
   let parsed;
   try { parsed = await parsePdf(req.file.buffer); } catch (e) { throw fail('Không đọc được file PDF: ' + e.message); }
+  if (!parsed.error) {
+    const want = req.query.type === 'N' || req.query.type === 'X' ? req.query.type : parsed.type || 'X';
+    const p = matchPartner(want, parsed.tax_code, parsed.partner);
+    if (p) { parsed.partner_id = p.id; parsed.partner_code = p.code; parsed.partner_ok = want === 'N' ? !!p.is_supplier : !!p.is_customer; if (!parsed.address) parsed.address = p.address; }
+  }
   audit(req, 'PDF_UPLOAD', `${req.file.originalname} -> ${parsed.error ? 'lỗi: ' + parsed.error : `nhận diện ${parsed.lines.length} dòng hàng, số ${parsed.number || '?'}`}`);
   res.json({ ...parsed, attachment: name, filename: req.file.originalname });
 }));
@@ -472,6 +615,25 @@ app.get('/api/reports/ledger', h((req, res) => {
   });
   const months = Object.keys(comp.months).filter((m) => m >= from && m <= to).map((m) => ({ month: m, ...comp.months[m].rows.get(it.id) }));
   res.json({ item: it, from, to, open_qty: first?.open_qty || 0, open_val: first?.open_val || 0, lines: out, months });
+}));
+
+function analyticsCtx() {
+  const lines = db.prepare(`SELECT l.id, l.item_id, l.qty, l.amount, v.id vid, v.type, v.number, v.date, v.partner_id, v.partner
+    FROM voucher_lines l JOIN vouchers v ON v.id = l.voucher_id WHERE v.date > ?`).all(getSetting('opening_date') || '0000-00-00')
+    .map((r) => ({ id: r.id, item_id: r.item_id, qty: r.qty, amount: r.amount, v: { id: r.vid, type: r.type, number: r.number, date: r.date, partner_id: r.partner_id, partner: r.partner } }));
+  return { lines, items: db.prepare('SELECT id, code, name, unit FROM items').all(), partners: db.prepare('SELECT id, code, name, is_customer, is_supplier FROM partners').all(), compute: costing.compute };
+}
+app.get('/api/reports/partners', h((req, res) => {
+  const { from, to } = reportRange(req.query);
+  res.json(analytics.partnerSummary(analyticsCtx(), from, to, req.query.kind));
+}));
+app.get('/api/reports/partner-detail', h((req, res) => {
+  const { from, to } = reportRange(req.query);
+  res.json(analytics.partnerDetail(analyticsCtx(), from, to, req.query.kind, String(req.query.key || '')));
+}));
+app.get('/api/reports/analytics', h((req, res) => {
+  const { from, to } = reportRange(req.query);
+  res.json(analytics.dashboard(analyticsCtx(), from, to, costing.monthsBetween(from, to)));
 }));
 
 app.get('/api/dashboard', h((req, res) => {

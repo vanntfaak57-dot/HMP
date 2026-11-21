@@ -52,17 +52,26 @@ const step = (s) => console.log('✔', s);
     assert.equal(neg.status, 400); assert.match(neg.d.error, /âm kho/); step('Chặn xuất âm kho (ngày 02/10 mới có 100)');
 
     // Đọc PDF phiếu xuất
+    // Danh mục đối tượng
+    const KH = await ok('/api/partners', { method: 'POST', body: { code: 'KH001', name: 'Công ty CP Xây dựng Minh Phát', is_customer: true, tax_code: '0101234567' } });
+    const NCC = await ok('/api/partners', { method: 'POST', body: { code: 'NCC001', name: 'Công ty Xi măng Hà Tiên', is_supplier: true } });
+    assert.equal((await api('/api/partners', { method: 'POST', body: { code: 'X1', name: 'Không loại' } })).status, 400);
+    const wrong = await api('/api/vouchers', { method: 'POST', body: { type: 'X', date: '2026-10-06', partner_id: NCC.id, lines: [{ item_id: A.id, qty: 1, unit_price: 1 }] } });
+    assert.equal(wrong.status, 400); assert.match(wrong.d.error, /không phải khách hàng/);
+    step('Danh mục khách hàng/NCC; chặn chọn NCC trên phiếu xuất');
+
     const pdfPath = path.join(dir, 'px.pdf');
     execFileSync(process.execPath, [path.join(__dirname, 'make-pdf.js'), pdfPath]);
     const fd = new FormData(); fd.append('file', new Blob([fs.readFileSync(pdfPath)], { type: 'application/pdf' }), 'phieu_xuat.pdf');
-    const p = await ok('/api/pdf/parse', { method: 'POST', body: fd });
+    const p = await ok('/api/pdf/parse?type=X', { method: 'POST', body: fd });
+    assert.equal(p.partner_id, KH.id); assert.equal(p.partner_ok, true);
     assert.equal(p.type, 'X'); assert.equal(p.number, 'XK-PDF-0015'); assert.equal(p.date, '2026-10-15');
     assert.match(p.partner, /Minh Phát/);
     assert.equal(p.lines.length, 2);
     assert.deepEqual(p.lines.map((l) => [l.code, l.qty, l.unit_price, l.amount]), [['VT001', 120, 100000, 12000000], ['VT002', 200, 18000, 3600000]]);
     assert.equal(p.unmatched.length, 1); assert.equal(p.unmatched[0].qty, 5);
     step(`Đọc PDF: số ${p.number}, ngày ${p.date}, KH "${p.partner}", ${p.lines.length} dòng khớp + ${p.unmatched.length} dòng chưa có mã`);
-    await ok('/api/vouchers', { method: 'POST', body: { type: 'X', number: p.number, date: p.date, partner: p.partner, source: 'pdf', attachment: p.attachment, lines: p.lines.filter((l) => l.code === 'VT001') } });
+    await ok('/api/vouchers', { method: 'POST', body: { type: 'X', number: p.number, date: p.date, partner_id: p.partner_id, partner: p.partner, source: 'pdf', attachment: p.attachment, lines: p.lines.filter((l) => l.code === 'VT001') } });
     await ok('/api/vouchers', { method: 'POST', body: { type: 'X', date: '2026-10-15', lines: [{ item_id: C.id, qty: 1, unit_price: 500 }] } });
     await ok('/api/vouchers', { method: 'POST', body: { type: 'X', date: '2026-10-20', lines: [{ item_id: C.id, qty: 1, unit_price: 500 }] } });
     await ok('/api/vouchers', { method: 'POST', body: { type: 'X', date: '2026-10-25', lines: [{ item_id: C.id, qty: 1, unit_price: 500 }] } });
@@ -93,6 +102,21 @@ const step = (s) => console.log('✔', s);
     const xs = await ok('/api/vouchers?type=X');
     const pdfV = xs.find((v) => v.number === 'XK-PDF-0015');
     assert.equal(pdfV.total_cost, 10320000); step('Giá vốn được ghi vào phiếu xuất');
+    assert.equal(pdfV.partner_code, 'KH001');
+    assert.equal((await ok(`/api/vouchers?type=X&partner_id=${KH.id}`)).length, 1);
+    const rk = await ok('/api/reports/partners?kind=KH&from=2026-10&to=2026-10');
+    const rowKH = rk.rows.find((r) => r.code === 'KH001');
+    assert.equal(rowKH.amount, 12000000); assert.equal(rowKH.cost, 10320000); assert.equal(rowKH.profit, 1680000);
+    assert.ok(rk.rows.some((r) => r.partner_id === null)); // phiếu chưa gắn đối tượng
+    const det = await ok(`/api/reports/partner-detail?kind=KH&key=${encodeURIComponent(rowKH.key)}&from=2026-10&to=2026-10`);
+    assert.equal(det.items[0].code, 'VT001'); assert.equal(det.vouchers[0].number, 'XK-PDF-0015');
+    step('Phiếu từ PDF tự nhận khách hàng theo MST/tên; báo cáo theo đối tượng');
+    const an = await ok('/api/reports/analytics?from=2026-10&to=2026-11');
+    assert.equal(an.months.length, 2);
+    assert.equal(an.months[0].cost, 10320000 + 1000); assert.equal(an.months[1].cost, 4380000);
+    assert.equal(an.totals.profit, an.totals.revenue - an.totals.cost);
+    assert.equal(an.top_customers[0].name, 'Công ty CP Xây dựng Minh Phát');
+    step(`Dashboard phân tích: doanh thu ${an.totals.revenue.toLocaleString('vi-VN')}, lãi gộp ${an.totals.profit.toLocaleString('vi-VN')}`);
 
     await ok('/api/periods/2026-10/lock', { method: 'POST', body: { locked: true } });
     assert.equal((await api(`/api/vouchers/${pdfV.id}`, { method: 'DELETE' })).status, 400); step('Khóa sổ chặn sửa/xóa chứng từ');

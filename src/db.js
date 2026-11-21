@@ -107,6 +107,27 @@ CREATE TABLE IF NOT EXISTS periods (
 );
 `);
 
+// Danh mục khách hàng & nhà cung cấp (đối tượng)
+db.exec(`CREATE TABLE IF NOT EXISTS partners (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  name TEXT NOT NULL,
+  is_customer INTEGER NOT NULL DEFAULT 0,
+  is_supplier INTEGER NOT NULL DEFAULT 0,
+  tax_code TEXT,
+  address TEXT,
+  phone TEXT,
+  email TEXT,
+  contact TEXT,
+  note TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT
+)`);
+if (!db.prepare('PRAGMA table_info(vouchers)').all().some((c) => c.name === 'partner_id')) {
+  db.exec('ALTER TABLE vouchers ADD COLUMN partner_id INTEGER REFERENCES partners(id)');
+}
+db.exec('CREATE INDEX IF NOT EXISTS idx_vouchers_partner ON vouchers(partner_id)');
+
 // Nâng cấp CSDL cũ: thêm cột thuế suất GTGT nếu chưa có
 if (!db.prepare('PRAGMA table_info(items)').all().some((c) => c.name === 'vat_rate')) {
   db.exec('ALTER TABLE items ADD COLUMN vat_rate TEXT');

@@ -14,7 +14,7 @@ const ACTIONS = {
   ITEM_CREATE: 'Thêm mã hàng', ITEM_UPDATE: 'Sửa mã hàng', ITEM_DELETE: 'Xóa mã hàng', ITEM_BULK_DELETE: 'Xóa hàng loạt mã hàng', ITEM_IMPORT: 'Nhập Excel danh mục',
   VOUCHER_CREATE: 'Thêm chứng từ', VOUCHER_UPDATE: 'Sửa chứng từ', VOUCHER_DELETE: 'Xóa chứng từ', PDF_UPLOAD: 'Tải PDF',
   COSTING_RUN: 'Tính giá xuất kho', PERIOD_LOCK: 'Khóa sổ', PERIOD_UNLOCK: 'Mở khóa sổ', USER_CREATE: 'Thêm người dùng',
-  USER_UPDATE: 'Sửa người dùng', SETTINGS_UPDATE: 'Sửa cài đặt', EXPORT: 'Xuất báo cáo',
+  USER_UPDATE: 'Sửa người dùng', PARTNER_CREATE: 'Thêm đối tượng', PARTNER_UPDATE: 'Sửa đối tượng', PARTNER_DELETE: 'Xóa đối tượng', PARTNER_IMPORT: 'Nhập Excel đối tượng', SETTINGS_UPDATE: 'Sửa cài đặt', EXPORT: 'Xuất báo cáo',
 };
 
 const VAT_OPTIONS = [['', '-- Chưa chọn --'], ['0', '0%'], ['5', '5%'], ['8', '8%'], ['10', '10%'], ['KCT', 'KCT – Không chịu thuế'], ['KKKNT', 'KKKNT – Không kê khai, tính nộp thuế']];
@@ -94,6 +94,9 @@ async function boot() {
 const routes = [
   [/^#\/dashboard$/, pageDashboard],
   [/^#\/items$/, pageItems],
+  [/^#\/partners$/, pagePartners],
+  [/^#\/analytics$/, pageAnalytics],
+  [/^#\/report-partners$/, pageReportPartners],
   [/^#\/vouchers\/(N|X)$/, (m) => pageVouchers(m[1])],
   [/^#\/voucher\/new\/(N|X)$/, (m) => pageVoucherForm(m[1], null)],
   [/^#\/voucher\/(\d+)$/, (m) => pageVoucherForm(null, Number(m[1]))],
@@ -282,10 +285,12 @@ async function pageVouchers(type) {
   $('#main').dataset.vtype = type;
   const now = todayStr();
   const q = JSON.parse(sessionStorage.getItem('vfilter' + type) || 'null') || { from: now.slice(0, 8) + '01', to: now, q: '' };
+  const vpartners = await api('/api/partners?kind=' + (type === 'X' ? 'KH' : 'NCC'));
   $('#main').innerHTML = `
     <h1>${TYPE[type]}</h1>
     <div class="toolbar">
       Từ <input type="date" id="vf-from" value="${q.from}"> đến <input type="date" id="vf-to" value="${q.to}">
+      <select id="vf-partner"><option value="">${type === 'X' ? 'Tất cả khách hàng' : 'Tất cả nhà cung cấp'}</option>${vpartners.map((p) => `<option value="${p.id}" ${String(q.partner_id || '') === String(p.id) ? 'selected' : ''}>${esc(p.code)} - ${esc(p.name)}</option>`).join('')}</select>
       <input id="vf-q" placeholder="Số phiếu, đối tượng, diễn giải…" value="${esc(q.q)}">
       <button class="btn" id="vf-go">Lọc</button>
       <span class="spacer"></span>
@@ -295,20 +300,21 @@ async function pageVouchers(type) {
       <th class="num">${type === 'N' ? 'Giá trị nhập' : 'Doanh thu'}</th>${type === 'X' ? '<th class="num">Giá vốn</th>' : ''}<th>Nguồn</th><th>Trạng thái kỳ</th></tr></thead>
     <tbody id="v-body"><tr><td colspan="8">Đang tải…</td></tr></tbody><tfoot id="v-foot"></tfoot></table></div>`;
   const load = async () => {
-    const f = { from: $('#vf-from').value, to: $('#vf-to').value, q: $('#vf-q').value };
+    const f = { from: $('#vf-from').value, to: $('#vf-to').value, q: $('#vf-q').value, partner_id: $('#vf-partner').value };
     sessionStorage.setItem('vfilter' + type, JSON.stringify(f));
-    const rows = await api(`/api/vouchers?type=${type}&from=${f.from}&to=${f.to}&q=${encodeURIComponent(f.q)}`);
+    const rows = await api(`/api/vouchers?type=${type}&from=${f.from}&to=${f.to}&q=${encodeURIComponent(f.q)}&partner_id=${f.partner_id}`);
     let ta = 0, tc = 0;
     $('#v-body').innerHTML = rows.map((v) => {
       ta += v.total_amount; tc += v.total_cost || 0;
       const st = v.locked ? '<span class="badge">Đã khóa sổ</span>' : v.period_status === 'computed' ? '<span class="badge ok">Đã tính giá</span>' : '<span class="badge warn">Chưa tính giá</span>';
-      return `<tr><td>${fmtD(v.date)}</td><td><a href="#/voucher/${v.id}">${esc(v.number)}</a></td><td>${esc(v.partner)}</td><td>${esc(v.description)}</td>
+      return `<tr><td>${fmtD(v.date)}</td><td><a href="#/voucher/${v.id}">${esc(v.number)}</a></td><td>${v.partner_code ? `<span class="muted">${esc(v.partner_code)}</span> ` : ''}${esc(v.partner)}</td><td>${esc(v.description)}</td>
         <td class="num">${fmtM(v.total_amount)}</td>${type === 'X' ? `<td class="num">${v.uncosted ? '<span class="muted">chưa tính</span>' : fmtM(v.total_cost)}</td>` : ''}
         <td>${v.source === 'pdf' ? 'PDF' : 'Nhập tay'}</td><td>${st}</td></tr>`;
     }).join('') || '<tr><td colspan="8" class="muted">Không có chứng từ</td></tr>';
     $('#v-foot').innerHTML = `<tr><td colspan="4">Tổng cộng (${rows.length} phiếu)</td><td class="num">${fmtM(ta)}</td>${type === 'X' ? `<td class="num">${fmtM(tc)}</td>` : ''}<td colspan="2"></td></tr>`;
   };
   $('#vf-go').addEventListener('click', () => load().catch((e) => toast(e.message, true)));
+  $('#vf-partner').addEventListener('change', () => load().catch((e) => toast(e.message, true)));
   await load();
 }
 
@@ -328,6 +334,13 @@ async function pageVoucherForm(type, id) {
   let unmatched = [];
   let state = { attachment: v.attachment || null, source: v.source };
   const X = type === 'X';
+  const KIND = X ? 'KH' : 'NCC';
+  const OBJ = X ? 'khách hàng' : 'nhà cung cấp';
+  let allPartners = await api('/api/partners');
+  let partnerId = v.partner_id || null;
+  const kindPartners = () => allPartners.filter((p) => (X ? p.is_customer : p.is_supplier));
+  const pickLabel = (p) => `${p.code} - ${p.name}`;
+  const curPartner = allPartners.find((p) => p.id === partnerId);
 
   $('#main').innerHTML = `
     <div class="toolbar"><a class="btn" href="#/vouchers/${type}">← Danh sách</a><h1 style="margin:0">${TYPE[type]} ${id ? esc(v.number) : '(mới)'}</h1>
@@ -343,7 +356,9 @@ async function pageVoucherForm(type, id) {
       <div class="form-grid" id="v-head">
         <label>Số phiếu<input name="number" value="${esc(v.number)}"></label>
         <label>Ngày chứng từ<input name="date" type="date" value="${v.date}"></label>
-        <label>${X ? 'Khách hàng' : 'Nhà cung cấp / Người giao hàng'}<input name="partner" value="${esc(v.partner)}"></label>
+        <label>${X ? 'Khách hàng' : 'Nhà cung cấp'} (chọn trong danh mục)<span class="pick-row"><input name="partner_pick" id="v-partner-pick" list="dl-partners" autocomplete="off" placeholder="Gõ mã hoặc tên…" value="${esc(curPartner ? pickLabel(curPartner) : '')}">
+          ${canWrite() && !v.locked ? `<button type="button" class="btn small" id="v-partner-new" title="Thêm ${OBJ} mới vào danh mục">+ Mới</button>` : ''}</span></label>
+        <label>Tên ${OBJ} in trên phiếu<input name="partner" value="${esc(v.partner)}"></label>
         <label>Số hóa đơn / chứng từ gốc<input name="ref_no" value="${esc(v.ref_no)}"></label>
         <label class="wide">Địa chỉ<input name="address" value="${esc(v.address)}"></label>
         <label class="wide">${X ? 'Lý do xuất' : 'Diễn giải'}<input name="description" value="${esc(v.description)}"></label>
@@ -354,6 +369,8 @@ async function pageVoucherForm(type, id) {
       ${X ? '<th class="num">Tồn kho</th>' : ''}<th class="num">Số lượng</th><th class="num">${X ? 'Đơn giá bán' : 'Đơn giá nhập'}</th><th class="num">${X ? 'Doanh thu' : 'Thành tiền'}</th>
       ${X ? '<th class="num">Đơn giá vốn</th><th class="num">Tiền vốn</th>' : ''}<th></th></tr></thead>
       <tbody id="l-body"></tbody><tfoot id="l-foot"></tfoot></table></div>
+    <datalist id="dl-partners">${kindPartners().map((p) => `<option value="${esc(pickLabel(p))}"></option>`).join('')}</datalist>
+    <div id="partner-hint"></div>
     <datalist id="dl-items">${items.map((i) => `<option value="${esc(i.code)}">${esc(i.name)}</option>`).join('')}</datalist>
     <div class="toolbar" style="margin-top:12px">
       ${editable ? `<button class="btn" id="l-add">+ Thêm dòng</button>` : ''}
@@ -363,6 +380,39 @@ async function pageVoucherForm(type, id) {
     </div>
     ${X ? `<p class="muted">Giá vốn được tính theo phương pháp <b>bình quân gia quyền cuối kỳ</b> (theo tháng) khi chạy <a href="#/costing">Tính giá xuất kho</a>. ${v.period_status === 'dirty' && id ? '<span class="badge warn">Kỳ này có thay đổi, cần tính lại giá</span>' : ''}</p>` : ''}
     ${id ? `<p class="muted">Tạo bởi ${esc(v.created_by)} lúc ${esc(v.created_at)}${v.updated_by ? ` · Sửa lần cuối bởi ${esc(v.updated_by)} lúc ${esc(v.updated_at)}` : ''}</p>` : ''}`;
+
+  // Chọn đối tượng: điền tên và địa chỉ theo danh mục
+  function setPartner(p) {
+    partnerId = p ? p.id : null;
+    $('#v-partner-pick').value = p ? pickLabel(p) : '';
+    if (p) {
+      $('#v-head [name=partner]').value = p.name;
+      if (p.address) $('#v-head [name=address]').value = p.address;
+      $('#partner-hint').innerHTML = '';
+    }
+  }
+  function refreshPartnerList() { $('#dl-partners').innerHTML = kindPartners().map((p) => `<option value="${esc(pickLabel(p))}"></option>`).join(''); }
+  function nextPartnerCode() {
+    const re = new RegExp('^' + KIND + '(\\d+)$', 'i');
+    let max = 0; for (const p of allPartners) { const m = p.code.match(re); if (m) max = Math.max(max, Number(m[1])); }
+    return KIND + String(max + 1).padStart(3, '0');
+  }
+  function newPartner(defaults = {}) {
+    partnerDialog(null, (p) => { allPartners.push(p); refreshPartnerList(); setPartner(p); }, { kind: KIND, code: nextPartnerCode(), ...defaults });
+  }
+  $('#v-partner-pick').addEventListener('change', (e) => {
+    const val = e.target.value.trim();
+    if (!val) { partnerId = null; return; }
+    const code = val.split(' - ')[0].trim().toLowerCase();
+    const p = kindPartners().find((x) => x.code.toLowerCase() === code) || kindPartners().find((x) => x.name.toLowerCase() === val.toLowerCase());
+    if (p) setPartner(p);
+    else { partnerId = null; toast(`"${val}" chưa có trong danh mục ${OBJ}. Bấm "+ Mới" để thêm.`, true); }
+  });
+  $('#v-partner-new')?.addEventListener('click', () => newPartner({ name: $('#v-head [name=partner]').value, address: $('#v-head [name=address]').value }));
+  $('#partner-hint').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-newpartner]'); if (!b) return;
+    newPartner(JSON.parse(b.dataset.newpartner));
+  });
 
   const byId = (iid) => items.find((i) => i.id == iid);
   const dis = editable ? '' : 'disabled';
@@ -462,13 +512,22 @@ async function pageVoucherForm(type, id) {
       $('#pdf-msg').innerHTML = '<div class="alert info">Đang đọc PDF…</div>';
       const fd = new FormData(); fd.append('file', file);
       try {
-        const p = await api('/api/pdf/parse', { method: 'POST', body: fd });
+        const p = await api('/api/pdf/parse?type=' + type, { method: 'POST', body: fd });
         state.attachment = p.attachment; state.source = 'pdf';
         if (p.error) { $('#pdf-msg').innerHTML = `<div class="alert">${esc(p.error)}</div>`; return; }
         const head = $('#v-head');
         if (p.number) head.querySelector('[name=number]').value = p.number;
         if (p.date) head.querySelector('[name=date]').value = p.date;
         for (const k of ['partner', 'address', 'description', 'ref_no']) if (p[k]) head.querySelector(`[name=${k}]`).value = p[k];
+        // Đối tượng trên PDF: khớp danh mục theo MST hoặc tên
+        const pm = p.partner_id && kindPartners().find((x) => x.id === p.partner_id);
+        if (pm) { setPartner(pm); if (p.partner) head.querySelector('[name=partner]').value = p.partner; }
+        else {
+          partnerId = null; $('#v-partner-pick').value = '';
+          if (p.partner_id) $('#partner-hint').innerHTML = `<div class="alert">Đối tượng <b>${esc(p.partner_code)}</b> có trong danh mục nhưng chưa được đánh dấu là ${OBJ}. Sửa loại đối tượng trong danh mục rồi chọn lại.</div>`;
+          else if (p.partner) $('#partner-hint').innerHTML = `<div class="alert">${X ? 'Khách hàng' : 'Nhà cung cấp'} <b>${esc(p.partner)}</b>${p.tax_code ? ` (MST ${esc(p.tax_code)})` : ''} chưa có trong danh mục.
+            ${canWrite() ? `<button type="button" class="btn small" data-newpartner="${esc(JSON.stringify({ name: p.partner, tax_code: p.tax_code || '', address: p.address || '' }))}">+ Thêm vào danh mục ${OBJ}</button>` : ''}</div>`;
+        }
         items = await api(`/api/items?date=${head.querySelector('[name=date]').value}&exclude=${id || 0}`);
         lines = p.lines.map((l) => ({ item_id: l.item_id, qty: l.qty, unit_price: l.unit_price, amount: l.amount }));
         if (!lines.length) lines.push({});
@@ -493,7 +552,9 @@ async function pageVoucherForm(type, id) {
     const bad = lines.find((l) => l._code);
     if (bad) return toast(`Mã "${bad._code}" không có trong danh mục`, true);
     if (unmatched.length && !confirm(`Còn ${unmatched.length} dòng hàng trong PDF chưa gán mã. Vẫn lưu?`)) return;
-    const body = { ...head, type, source: state.source, attachment: state.attachment, lines: lines.filter((l) => l.item_id) };
+    delete head.partner_pick;
+    if (!partnerId && $('#v-partner-pick').value.trim()) return toast(`"${$('#v-partner-pick').value}" chưa có trong danh mục ${OBJ}. Chọn lại hoặc bấm "+ Mới".`, true);
+    const body = { ...head, partner_id: partnerId, type, source: state.source, attachment: state.attachment, lines: lines.filter((l) => l.item_id) };
     try {
       const r = await api(id ? `/api/vouchers/${id}` : '/api/vouchers', { method: id ? 'PUT' : 'POST', body });
       toast('Đã lưu chứng từ');

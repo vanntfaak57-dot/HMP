@@ -18,7 +18,8 @@ def rep(s, a, b, count=1):
     assert a in s, a
     return s.replace(a, b) if count is None else s.replace(a, b, count)
 
-app = hashfix(app)
+partners = (root / 'public' / 'partners.js').read_text()
+app = hashfix(app).rsplit('boot();', 1)[0] + '\n' + hashfix(partners)
 app = re.sub(r'(?<![\w.])confirm\(', 'await uiConfirm(', app)
 app = re.sub(r'(?<![\w.])prompt\(', 'await uiPrompt(', app)
 app = rep(app, "const w = window.open('', '_blank');\n  w.document.write(", 'showPaper(')
@@ -28,6 +29,7 @@ app = rep(app, '<button class="btn" onclick="print()">In</button>', '', None)
 app = rep(app, '<button class="btn" id="r-xlsx">Xuất Excel</button>', '')
 app = rep(app, "$('#r-xlsx').addEventListener", "$('#r-xlsx')?.addEventListener")
 app = rep(app, '<a class="btn" href="/api/items/template.xlsx">Tải file Excel mẫu</a>', '<button class="btn" type="button" onclick="showColumns()">Định dạng file Excel</button>')
+app = rep(app, '<a class="btn" href="/api/partners/template.xlsx">Tải file Excel mẫu</a>', '<button class="btn" type="button" onclick="showPartnerColumns()">Định dạng file Excel</button>')
 assert '#/' not in app
 
 body = html.split('<body>')[1].split('<script')[0]
@@ -54,10 +56,13 @@ out = f'''<title>Quản lý kho</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>window.SAMPLE_PDF = "{pdf_b64}";</script>
 <script>
+{(root / 'src' / 'analytics.js').read_text()}
+</script>
+<script>
 {(d / 'mock.js').read_text()}
 </script>
 <script>
-{app.rsplit('boot();', 1)[0]}
+{app}
 {(d / 'glue.js').read_text()}
 boot();
 </script>

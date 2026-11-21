@@ -40,6 +40,15 @@ function showColumns() {
     <p class="muted">Thuế suất GTGT nhận: 0%, 5%, 8%, 10%, KCT (không chịu thuế), KKKNT (không kê khai, tính nộp thuế); để trống nếu chưa xác định.</p>
     <p class="muted">Mã đã có sẽ được cập nhật, mã mới sẽ được thêm.</p><div class="actions"><button class="btn primary" data-close>Đã hiểu</button></div>`);
 }
+function showPartnerColumns() {
+  modal(`<h2>Định dạng file Excel khách hàng &amp; nhà cung cấp</h2>
+    <p>Dòng 1 là tiêu đề, dữ liệu từ dòng 2, theo thứ tự cột:</p>
+    <div class="table-wrap"><table><tr><th>A</th><th>B</th><th>C</th><th>D</th><th>E</th><th>F</th><th>G</th><th>H</th><th>I</th></tr>
+    <tr><td>Mã</td><td>Tên đối tượng</td><td>Loại</td><td>Mã số thuế</td><td>Địa chỉ</td><td>Điện thoại</td><td>Email</td><td>Người liên hệ</td><td>Ghi chú</td></tr>
+    <tr><td>KH001</td><td>Công ty CP Minh Phát</td><td>KH</td><td>0101234567</td><td>12 Láng Hạ</td><td>0912…</td><td></td><td>Anh Tuấn</td><td></td></tr></table></div>
+    <p class="muted">Cột Loại ghi KH, NCC hoặc KH,NCC (vừa là khách hàng vừa là nhà cung cấp). Mã đã có sẽ được cập nhật.</p>
+    <div class="actions"><button class="btn primary" data-close>Đã hiểu</button></div>`);
+}
 // Xem PDF gốc đính kèm
 document.addEventListener('click', async (e) => {
   const a = e.target.closest('a[href^="/api/attachments/"]');

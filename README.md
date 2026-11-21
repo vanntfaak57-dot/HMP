@@ -19,13 +19,15 @@ Biến môi trường tùy chọn: `PORT` (mặc định 3000), `HOST` (mặc đ
 
 1. **Cài đặt** → nhập tên đơn vị và **ngày chốt số dư đầu kỳ (ngày A)**.
 2. **Vật tư hàng hóa & tồn đầu** → tải *file Excel mẫu*, điền Mã / Tên / ĐVT / SL tồn / Giá trị tồn tại ngày A, rồi *Nhập từ Excel* (hoặc thêm từng mã).
-3. **Phiếu nhập kho / Phiếu xuất kho bán hàng** → *Thêm phiếu*:
+3. **Khách hàng & nhà cung cấp** → thêm từng đối tượng hoặc nhập từ Excel (Mã, Tên, Loại KH/NCC, MST, Địa chỉ, Điện thoại, Email, Người liên hệ, Ghi chú). Một đối tượng có thể vừa là khách hàng vừa là nhà cung cấp.
+4. **Phiếu nhập kho / Phiếu xuất kho bán hàng** → *Thêm phiếu*:
    - kéo thả file **PDF** phiếu xuất kho / hóa đơn → hệ thống tự đọc số phiếu, ngày, khách hàng, lý do, các dòng hàng (mã, số lượng, đơn giá, thành tiền). Dòng có mã chưa có trong danh mục sẽ được liệt kê để chọn mã hoặc tạo mã mới. Kiểm tra lại rồi bấm *Lưu*. File PDF gốc được lưu kèm chứng từ.
    - hoặc nhập tay.
+   - Chọn khách hàng (phiếu xuất) hoặc nhà cung cấp (phiếu nhập) trong danh mục; tên và địa chỉ tự điền. Khi đọc PDF, hệ thống tự nhận đối tượng theo mã số thuế hoặc tên; nếu chưa có thì gợi ý thêm vào danh mục.
    - Hệ thống chặn chứng từ trước ngày A, chặn xuất âm kho, chặn trùng số phiếu.
-4. **Tính giá xuất kho** → chọn tháng, bấm *Tính giá đến kỳ này*. Giá vốn được ghi vào từng dòng phiếu xuất.
-5. **Báo cáo**: Tổng hợp nhập-xuất-tồn (xuất Excel, in), Sổ chi tiết vật tư (kèm đơn giá bình quân từng kỳ).
-6. **Khóa sổ** (admin) kỳ đã tính giá để không ai sửa/xóa chứng từ trong kỳ.
+5. **Tính giá xuất kho** → chọn tháng, bấm *Tính giá đến kỳ này*. Giá vốn được ghi vào từng dòng phiếu xuất.
+6. **Báo cáo**: Dashboard phân tích (doanh thu, giá vốn, lãi gộp, nhập kho, tồn kho theo tháng; top khách hàng, mặt hàng, nhà cung cấp), Tổng hợp nhập-xuất-tồn (xuất Excel, in), Sổ chi tiết vật tư, Tổng hợp theo đối tượng (bán hàng theo khách hàng có lãi gộp, mua hàng theo nhà cung cấp; bấm vào tên để xem chi tiết theo mặt hàng và chứng từ).
+7. **Khóa sổ** (admin) kỳ đã tính giá để không ai sửa/xóa chứng từ trong kỳ.
 
 ## Cách tính giá vốn
 

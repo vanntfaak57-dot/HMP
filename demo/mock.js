@@ -2,7 +2,7 @@
 // Logic nghiệp vụ được chuyển nguyên từ server.js / src/*.js; dữ liệu lưu trong localStorage của trình duyệt.
 'use strict';
 (function () {
-  const DB_KEY = 'kho-demo-v2';
+  const DB_KEY = 'kho-demo-v3';
   const SID_KEY = 'kho-demo-sid';
   const EPS = 1e-9;
   let D = null;
@@ -38,7 +38,7 @@
 
   // ---------------- Dữ liệu mẫu ----------------
   function seed() {
-    D = { seq: {}, users: [], sessions: [], audit: [], settings: {}, items: [], vouchers: [], lines: [], periods: {} };
+    D = { seq: {}, users: [], sessions: [], audit: [], settings: {}, items: [], vouchers: [], lines: [], periods: {}, partners: [] };
     D.settings = { company_name: 'Công ty TNHH Vật liệu Xây dựng An Phát (DEMO)', company_address: '25 Nguyễn Trãi, Thanh Xuân, Hà Nội', company_tax: '0109xxxxxx', opening_date: '2026-09-30' };
     const mkUser = (username, full_name, role, pw) => D.users.push({ id: nextId('users'), username, full_name, role, password_hash: hash(pw), active: 1, must_change: 0, failed_count: 0, locked_until: null, created_at: '2026-09-30 08:00:00' });
     mkUser('admin', 'Quản trị hệ thống', 'admin', 'admin123');
@@ -51,10 +51,21 @@
       ['VT005', 'Gạch đặc A1', 'Viên', 5000, 6000000, '8'],
     ];
     for (const [code, name, unit, q, v, vat] of items) D.items.push({ id: nextId('items'), code, name, unit, vat_rate: vat, opening_qty: q, opening_value: v, note: '', created_at: '2026-09-30 08:00:00' });
+    const PARTNERS = [
+      ['KH001', 'Công ty CP Xây dựng Đại Việt', 1, 0, '0105556677', '18 Trần Duy Hưng, Cầu Giấy, Hà Nội', '0243 556 677', 'Chị Lan'],
+      ['KH002', 'Công ty TNHH Nhà Xanh', 1, 0, '0108889990', '45 Lê Văn Lương, Thanh Xuân, Hà Nội', '0912 888 999', 'Anh Hùng'],
+      ['KH003', 'Anh Trần Văn Nam', 1, 0, '', 'Xã Kim Chung, Đông Anh, Hà Nội', '0987 123 456', ''],
+      ['KH004', 'Công ty CP Xây dựng Minh Phát', 1, 0, '0101234567', '12 Láng Hạ, Đống Đa, Hà Nội', '0243 123 456', 'Anh Tuấn'],
+      ['NCC001', 'Công ty Xi măng Hà Tiên', 0, 1, '0300000001', 'Thủ Đức, TP. Hồ Chí Minh', '028 3896 1234', 'Phòng kinh doanh'],
+      ['NCC002', 'Công ty Thép Hòa Phát', 0, 1, '0900189284', 'KCN Phố Nối A, Hưng Yên', '0221 394 2884', ''],
+      ['NCC003', 'HTX Cát sỏi Sông Hồng', 0, 1, '', 'Bến Chương Dương, Hoàn Kiếm, Hà Nội', '0904 222 333', 'Bác Thành'],
+    ];
+    for (const [code, name, kh, ncc, tax, address, phone, contact] of PARTNERS) D.partners.push({ id: nextId('partners'), code, name, is_customer: kh, is_supplier: ncc, tax_code: tax, address, phone, email: '', contact, note: '', created_at: '2026-09-30 08:00:00' });
+    const pid = (name) => D.partners.find((p) => p.name === name)?.id || null;
     const id = (c) => D.items.find((i) => i.code === c).id;
     const V = (type, number, date, partner, description, lines) => {
       const vid = nextId('vouchers');
-      D.vouchers.push({ id: vid, type, number, date, partner, address: '', description, ref_no: '', source: 'manual', attachment: null, created_by: 'ketoan', created_at: date + ' 09:00:00' });
+      D.vouchers.push({ id: vid, type, number, date, partner_id: pid(partner), partner, address: D.partners.find((p) => p.name === partner)?.address || '', description, ref_no: '', source: 'manual', attachment: null, created_by: 'ketoan', created_at: date + ' 09:00:00' });
       lines.forEach(([c, qty, price], i) => D.lines.push({ id: nextId('lines'), voucher_id: vid, item_id: id(c), qty, unit_price: price, amount: Math.round(qty * price), cost_price: null, cost_amount: null, sort: i }));
     };
     V('N', 'NK00001', '2026-10-05', 'Công ty Xi măng Hà Tiên', 'Nhập kho mua hàng', [['VT001', 50, 88000]]);
@@ -73,7 +84,8 @@
   function load() {
     try { const s = localStorage.getItem(DB_KEY); if (s) D = JSON.parse(s); } catch { D = null; }
     if (!D || !D.users) seed();
-    else D.items.forEach((i) => { if (i.vat_rate === undefined) i.vat_rate = null; });
+    D.partners = D.partners || [];
+    D.items.forEach((i) => { if (i.vat_rate === undefined) i.vat_rate = null; });
   }
   function resetDemo() { try { localStorage.removeItem(DB_KEY); sessionStorage.removeItem(SID_KEY); } catch { /* bỏ qua */ } D = null; seed(); }
 
@@ -237,7 +249,7 @@
     const byCode = new Map(D.items.map((i) => [norm(i.code), i]));
     const byName = new Map(D.items.map((i) => [norm(i.name), i]));
     const lines = text.split('\n');
-    const result = { type: null, number: null, date: null, partner: null, address: null, description: null, ref_no: null, lines: [], unmatched: [], warnings: [] };
+    const result = { type: null, number: null, date: null, partner: null, tax_code: null, address: null, description: null, ref_no: null, lines: [], unmatched: [], warnings: [] };
     if (/PHIẾU\s*NHẬP\s*KHO/i.test(text)) result.type = 'N';
     else if (/PHIẾU\s*XUẤT\s*KHO|HÓA\s*ĐƠN|HOÁ\s*ĐƠN|PHIẾU\s*GIAO\s*HÀNG/i.test(text)) result.type = 'X';
     let partnerIdx = -1;
@@ -252,6 +264,7 @@
         const m = raw.match(/(?:Họ\s*(?:và)?\s*tên\s*người\s*(?:nhận|mua|giao)\s*hàng|Tên\s*khách\s*hàng|Khách\s*hàng|Tên\s*đơn\s*vị|Đơn\s*vị\s*bán\s*hàng|Nhà\s*cung\s*cấp|Người\s*mua\s*hàng)\s*[:：]\s*([^\t]+)/i);
         if (m && m[1].trim()) { result.partner = m[1].trim(); partnerIdx = li; }
       }
+      if (!result.tax_code && partnerIdx >= 0 && li >= partnerIdx) { const m = raw.match(/(?:Mã\s*số\s*thuế|MST)\s*[:：]?\s*([0-9][0-9\- ]{8,15}[0-9])/i); if (m) result.tax_code = m[1].replace(/\s/g, ''); }
       if (!result.address && partnerIdx >= 0 && li >= partnerIdx) { const m = raw.match(/(?:Địa\s*chỉ(?:\s*\(bộ\s*phận\))?)\s*[:：]\s*([^\t]+)/i); if (m && m[1].trim()) result.address = m[1].trim(); }
       if (!result.description) { const m = raw.match(/(?:Lý\s*do\s*(?:xuất|nhập)(?:\s*kho)?|Diễn\s*giải|Nội\s*dung)\s*[:：]\s*([^\t]+)/i); if (m && m[1].trim()) result.description = m[1].trim(); }
       if (!result.ref_no) { const m = raw.match(/(?:Số\s*hóa\s*đơn|Số\s*HĐ|Theo\s*hóa\s*đơn\s*số|Ký\s*hiệu)\s*[:：]?\s*([A-Za-z0-9\-\/]+)/i); if (m && /\d/.test(m[1])) result.ref_no = m[1]; }
@@ -301,7 +314,7 @@
   function getVoucher(id) {
     const v = D.vouchers.find((x) => x.id === Number(id)); if (!v) return null;
     const p = period(v.date.slice(0, 7));
-    return { ...v, period_status: p?.status || null, locked: p?.locked ? 1 : 0,
+    return { ...v, partner_code: D.partners.find((x) => x.id === v.partner_id)?.code || null, period_status: p?.status || null, locked: p?.locked ? 1 : 0,
       lines: D.lines.filter((l) => l.voucher_id === v.id).sort((a, b) => a.sort - b.sort || a.id - b.id)
         .map((l) => { const it = D.items.find((i) => i.id === l.item_id); return { ...l, code: it.code, name: it.name, unit: it.unit }; }) };
   }
@@ -314,6 +327,14 @@
     if (b.date <= A) throw fail(`Ngày chứng từ phải sau ngày chốt số dư ${A}`);
     if (isLocked(b.date.slice(0, 7))) throw fail(`Kỳ ${b.date.slice(0, 7)} đã khóa sổ`);
     const number = String(b.number || '').trim() || nextNumber(type);
+    let partner_id = null; let partnerName = String(b.partner || '').trim();
+    if (b.partner_id) {
+      const p = D.partners.find((x) => x.id === Number(b.partner_id));
+      if (!p) throw fail('Đối tượng không tồn tại trong danh mục');
+      if (type === 'X' && !p.is_customer) throw fail(`${p.code} - ${p.name} không phải khách hàng. Sửa loại đối tượng trong danh mục hoặc chọn đối tượng khác.`);
+      if (type === 'N' && !p.is_supplier) throw fail(`${p.code} - ${p.name} không phải nhà cung cấp. Sửa loại đối tượng trong danh mục hoặc chọn đối tượng khác.`);
+      partner_id = p.id; if (!partnerName) partnerName = p.name;
+    }
     const lines = (b.lines || []).filter((l) => l && l.item_id);
     if (!lines.length) throw fail('Chứng từ phải có ít nhất một dòng hàng');
     const clean = lines.map((l, i) => {
@@ -326,7 +347,7 @@
       return { item_id: item.id, qty, unit_price: price, amount, sort: i };
     });
     const att = b.attachment && ATT.has(b.attachment) ? b.attachment : (b.attachment || null);
-    return { type, number, date: b.date, partner: b.partner || '', address: b.address || '', description: b.description || '', ref_no: b.ref_no || '', source: b.source === 'pdf' ? 'pdf' : 'manual', attachment: att, lines: clean };
+    return { type, number, date: b.date, partner_id, partner: partnerName, address: b.address || '', description: b.description || '', ref_no: b.ref_no || '', source: b.source === 'pdf' ? 'pdf' : 'manual', attachment: att, lines: clean };
   }
   const summary = (v) => `${TYPE_NAME[v.type]} ${v.number} ngày ${v.date}, ${v.lines.length} dòng, tổng ${v.lines.reduce((s, l) => s + l.amount, 0).toLocaleString('vi-VN')}`;
   const insertLines = (vid, lines) => lines.forEach((l) => D.lines.push({ id: nextId('lines'), voucher_id: vid, ...l, cost_price: null, cost_amount: null }));
@@ -473,15 +494,86 @@
     return { created, updated };
   });
 
+  // ---- Khách hàng & nhà cung cấp
+  const truthy = (v) => v === true || v === 1 || v === '1' || v === 'on';
+  function cleanPartner(b) {
+    const code = String(b.code || '').trim(), name = String(b.name || '').trim();
+    if (!code || !name) throw fail('Mã và tên đối tượng là bắt buộc');
+    const is_customer = truthy(b.is_customer) ? 1 : 0, is_supplier = truthy(b.is_supplier) ? 1 : 0;
+    if (!is_customer && !is_supplier) throw fail(`Đối tượng ${code}: chọn ít nhất một loại (Khách hàng hoặc Nhà cung cấp)`);
+    const s = (k, n = 300) => String(b[k] ?? '').trim().slice(0, n);
+    return { code, name, is_customer, is_supplier, tax_code: s('tax_code', 20), address: s('address'), phone: s('phone', 50), email: s('email', 100), contact: s('contact', 100), note: s('note') };
+  }
+  function parseKind(t) {
+    const s = String(t || '').toUpperCase().normalize('NFC'); const both = /CẢ|CA HAI|BOTH/.test(s);
+    return { is_customer: both || /KH|KHÁCH/.test(s) ? 1 : 0, is_supplier: both || /NCC|CUNG CẤP|CUNG CAP/.test(s) ? 1 : 0 };
+  }
+  R('GET', '/api/partners', ({ query }) => D.partners.filter((p) => (query.kind !== 'KH' || p.is_customer) && (query.kind !== 'NCC' || p.is_supplier))
+    .sort((a, b) => cmp(a.code, b.code)).map((p) => ({ ...p, voucher_count: D.vouchers.filter((v) => v.partner_id === p.id).length })));
+  R('POST', '/api/partners', ({ user, body }) => { W(user);
+    const p = cleanPartner(body);
+    if (D.partners.some((x) => ci(x.code, p.code))) throw fail(`Mã đối tượng ${p.code} đã tồn tại`);
+    const id = tx(() => { const id = nextId('partners'); D.partners.push({ id, ...p, created_at: now() }); return id; });
+    audit(user, 'PARTNER_CREATE', `${p.code} - ${p.name}`); return { id };
+  });
+  R('PUT', '/api/partners/:id', ({ user, params, body }) => { W(user);
+    const old = D.partners.find((x) => x.id === Number(params.id)); if (!old) throw fail('Không tìm thấy đối tượng', 404);
+    const p = cleanPartner(body);
+    if (D.partners.some((x) => x.id !== old.id && ci(x.code, p.code))) throw fail(`Mã đối tượng ${p.code} đã tồn tại`);
+    tx(() => Object.assign(old, p, { updated_at: now() }));
+    audit(user, 'PARTNER_UPDATE', `${p.code}: ${JSON.stringify(p)}`); return { ok: true };
+  });
+  R('POST', '/api/partners/bulk-delete', ({ user, body }) => { W(user);
+    const ids = [...new Set((body.ids || []).map(Number).filter(Number.isInteger))];
+    if (!ids.length) throw fail('Chưa chọn đối tượng nào');
+    const deleted = [], skipped = [];
+    tx(() => { for (const id of ids) {
+      const p = D.partners.find((x) => x.id === id);
+      if (!p) { skipped.push({ code: `#${id}`, reason: 'Không còn tồn tại' }); continue; }
+      const n = D.vouchers.filter((v) => v.partner_id === id).length;
+      if (n) { skipped.push({ code: p.code, name: p.name, reason: `Đã có ${n} chứng từ` }); continue; }
+      D.partners = D.partners.filter((x) => x !== p); deleted.push(p.code);
+    } });
+    audit(user, 'PARTNER_DELETE', `Xóa ${deleted.length} đối tượng: ${deleted.join(', ') || '(không có)'}${skipped.length ? ` | bỏ qua: ${skipped.map((s) => `${s.code} (${s.reason})`).join(', ')}` : ''}`);
+    return { deleted, skipped };
+  });
+  R('POST', '/api/partners/import', async ({ user, body }) => { W(user);
+    const f = body.get('file'); if (!f) throw fail('Chưa chọn file');
+    const wb = window.XLSX.read(await f.arrayBuffer(), { type: 'array' });
+    const data = window.XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+    const rows = [];
+    data.forEach((r, i) => { if (i === 0 || !String(r[0] ?? '').trim()) return;
+      const c = Array.from({ length: 9 }, (_, k) => String(r[k] ?? '').trim());
+      try { rows.push(cleanPartner({ code: c[0], name: c[1], ...parseKind(c[2]), tax_code: c[3], address: c[4], phone: c[5], email: c[6], contact: c[7], note: c[8] })); }
+      catch (e) { throw fail(`Dòng ${i + 1}: ${e.message}`); } });
+    if (!rows.length) throw fail('File không có dữ liệu (dòng 1 là tiêu đề, từ dòng 2: Mã, Tên, Loại, MST, Địa chỉ, Điện thoại, Email, Người liên hệ, Ghi chú)');
+    let created = 0, updated = 0;
+    tx(() => { for (const p of rows) {
+      const ex = D.partners.find((x) => ci(x.code, p.code));
+      if (ex) { Object.assign(ex, p, { updated_at: now() }); updated++; } else { D.partners.push({ id: nextId('partners'), ...p, created_at: now() }); created++; }
+    } });
+    audit(user, 'PARTNER_IMPORT', `Nhập Excel đối tượng: thêm ${created}, cập nhật ${updated}`); return { created, updated };
+  });
+  function analyticsCtx() {
+    const A = D.settings.opening_date || '0000-00-00';
+    const vmap = new Map(D.vouchers.map((v) => [v.id, v]));
+    const lines = D.lines.map((l) => ({ id: l.id, item_id: l.item_id, qty: l.qty, amount: l.amount, v: vmap.get(l.voucher_id) })).filter((l) => l.v && l.v.date > A);
+    return { lines, items: D.items, partners: D.partners, compute };
+  }
+  R('GET', '/api/reports/partners', ({ query }) => { const { from, to } = reportRange(query); return window.KhoAnalytics.partnerSummary(analyticsCtx(), from, to, query.kind); });
+  R('GET', '/api/reports/partner-detail', ({ query }) => { const { from, to } = reportRange(query); return window.KhoAnalytics.partnerDetail(analyticsCtx(), from, to, query.kind, String(query.key || '')); });
+  R('GET', '/api/reports/analytics', ({ query }) => { const { from, to } = reportRange(query); return window.KhoAnalytics.dashboard(analyticsCtx(), from, to, monthsBetween(from, to)); });
+
   R('GET', '/api/vouchers/next-number', ({ query }) => ({ number: nextNumber(query.type === 'X' ? 'X' : 'N') }));
   R('GET', '/api/vouchers', ({ query: q }) => {
     const s = (q.q || '').toLowerCase();
     return D.vouchers.filter((v) => (!q.type || v.type === q.type) && (!isDate(q.from) || v.date >= q.from) && (!isDate(q.to) || v.date <= q.to)
-      && (!s || [v.number, v.partner, v.description].some((x) => String(x || '').toLowerCase().includes(s))))
+      && (!s || [v.number, v.partner, v.description].some((x) => String(x || '').toLowerCase().includes(s)))
+      && (!q.partner_id || v.partner_id === Number(q.partner_id)))
       .sort((a, b) => cmp(b.date, a.date) || b.id - a.id)
       .map((v) => {
         const ls = D.lines.filter((l) => l.voucher_id === v.id); const p = period(v.date.slice(0, 7));
-        return { ...v, total_amount: ls.reduce((t, l) => t + l.amount, 0), total_cost: ls.reduce((t, l) => t + (l.cost_amount || 0), 0), line_count: ls.length,
+        return { ...v, partner_code: D.partners.find((x) => x.id === v.partner_id)?.code || null, total_amount: ls.reduce((t, l) => t + l.amount, 0), total_cost: ls.reduce((t, l) => t + (l.cost_amount || 0), 0), line_count: ls.length,
           uncosted: ls.filter((l) => l.cost_amount == null).length, period_status: p?.status || null, locked: p?.locked ? 1 : 0 };
       });
   });
@@ -518,7 +610,7 @@
     audit(user, 'VOUCHER_DELETE', summary(old)); return { ok: true };
   });
 
-  R('POST', '/api/pdf/parse', async ({ user, body }) => {
+  R('POST', '/api/pdf/parse', async ({ user, body, query }) => {
     W(user);
     const f = body.get('file'); if (!f) throw fail('Chưa chọn file PDF');
     const buf = await f.arrayBuffer();
@@ -530,6 +622,13 @@
       const text = await extractLines(buf);
       parsed = text.replace(/\s/g, '').length < 20 ? { error: 'File PDF không có lớp chữ (có thể là ảnh scan). Vui lòng dùng PDF xuất từ phần mềm hoặc nhập tay.', text } : { ...parseText(text), text };
     } catch (e) { throw fail('Không đọc được file PDF: ' + e.message); }
+    if (!parsed.error) {
+      const want = query.type === 'N' || query.type === 'X' ? query.type : parsed.type || 'X';
+      const digits = String(parsed.tax_code || '').replace(/\D/g, '');
+      const nn = (x) => String(x || '').normalize('NFC').toLowerCase().replace(/\s+/g, ' ').trim();
+      const pm = (digits && D.partners.find((x) => String(x.tax_code || '').replace(/\D/g, '') === digits)) || (parsed.partner && D.partners.find((x) => nn(x.name) === nn(parsed.partner)));
+      if (pm) { parsed.partner_id = pm.id; parsed.partner_code = pm.code; parsed.partner_ok = want === 'N' ? !!pm.is_supplier : !!pm.is_customer; if (!parsed.address) parsed.address = pm.address; }
+    }
     audit(user, 'PDF_UPLOAD', `${f.name} -> ${parsed.error ? 'lỗi: ' + parsed.error : `nhận diện ${parsed.lines.length} dòng hàng, số ${parsed.number || '?'}`}`);
     return { ...parsed, attachment: name, filename: f.name };
   });

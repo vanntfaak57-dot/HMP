@@ -85,7 +85,7 @@ function parseText(text) {
   const byCode = new Map(items.map((i) => [norm(i.code), i]));
   const byName = new Map(items.map((i) => [norm(i.name), i]));
   const lines = text.split('\n');
-  const result = { type: null, number: null, date: null, partner: null, address: null, description: null, ref_no: null, lines: [], unmatched: [], warnings: [] };
+  const result = { type: null, number: null, date: null, partner: null, tax_code: null, address: null, description: null, ref_no: null, lines: [], unmatched: [], warnings: [] };
 
   if (/PHIẾU\s*NHẬP\s*KHO/i.test(text)) result.type = 'N';
   else if (/PHIẾU\s*XUẤT\s*KHO|HÓA\s*ĐƠN|HOÁ\s*ĐƠN|PHIẾU\s*GIAO\s*HÀNG/i.test(text)) result.type = 'X';
@@ -104,6 +104,10 @@ function parseText(text) {
     if (!result.partner) {
       const m = raw.match(/(?:Họ\s*(?:và)?\s*tên\s*người\s*(?:nhận|mua|giao)\s*hàng|Tên\s*khách\s*hàng|Khách\s*hàng|Tên\s*đơn\s*vị|Đơn\s*vị\s*bán\s*hàng|Nhà\s*cung\s*cấp|Người\s*mua\s*hàng)\s*[:：]\s*([^\t]+)/i);
       if (m && m[1].trim()) { result.partner = m[1].trim(); partnerIdx = li; }
+    }
+    if (!result.tax_code && partnerIdx >= 0 && li >= partnerIdx) {
+      const m = raw.match(/(?:Mã\s*số\s*thuế|MST)\s*[:：]?\s*([0-9][0-9\- ]{8,15}[0-9])/i);
+      if (m) result.tax_code = m[1].replace(/[\s]/g, '');
     }
     // Địa chỉ của đối tượng: chỉ lấy dòng nằm sau tên khách hàng/NCC (dòng địa chỉ đầu phiếu là của đơn vị mình)
     if (!result.address && partnerIdx >= 0 && li >= partnerIdx) {
