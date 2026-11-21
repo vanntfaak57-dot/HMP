@@ -4,7 +4,10 @@ const fs = require('fs'); const os = require('os'); const path = require('path')
 const assert = require('assert');
 const dir = fs.mkdtempSync(path.join(process.env.TEST_TMP || os.tmpdir(), 'kho-'));
 const PORT = 3998; const B = `http://127.0.0.1:${PORT}`;
-const srv = spawn(process.execPath, ['--no-warnings', path.join(__dirname, '..', 'server.js')], { env: { ...process.env, PORT, DATA_DIR: dir }, stdio: 'pipe' });
+// APP_BIN=<đường dẫn file chạy đã đóng gói> để kiểm thử chính bản app (KhoETC)
+const srv = process.env.APP_BIN
+  ? spawn(process.env.APP_BIN, [], { env: { ...process.env, PORT, DATA_DIR: dir, NO_BROWSER: '1' }, stdio: 'pipe' })
+  : spawn(process.execPath, ['--no-warnings', path.join(__dirname, '..', 'server.js')], { env: { ...process.env, PORT, DATA_DIR: dir }, stdio: 'pipe' });
 let cookie = '';
 async function api(url, opts = {}) {
   const o = { method: 'GET', headers: { cookie }, ...opts };
@@ -98,6 +101,16 @@ const step = (s) => console.log('✔', s);
     assert.equal(lp[I50.id].price_vat, 110250); assert.equal(lp[I50.id].vat_rate, '5');
     assert.deepEqual(await ok(`/api/last-prices?type=X&partner_id=${NCC.id}`), {});
     step('Giá bán trong danh mục (+VAT/-VAT), lưu giá +VAT trên phiếu, giá gần nhất theo khách hàng');
+    // Số chứng từ tự động theo cài đặt; số đề xuất bị chiếm thì tự lấy số kế tiếp
+    await ok('/api/settings', { method: 'PUT', body: { number_prefix_X: 'BHT', number_digits: 4 } });
+    assert.equal((await ok('/api/vouchers/next-number?type=X')).number, 'BHT0001');
+    const a1 = await ok('/api/vouchers', { method: 'POST', body: { type: 'X', date: '2026-12-02', auto_number: true, number: 'BHT0001', lines: [{ item_id: I50.id, qty: 1, unit_price: 1 }] } });
+    const a2 = await ok('/api/vouchers', { method: 'POST', body: { type: 'X', date: '2026-12-02', auto_number: true, number: 'BHT0001', lines: [{ item_id: I50.id, qty: 1, unit_price: 1 }] } });
+    assert.equal((await ok('/api/vouchers/' + a1.id)).number, 'BHT0001'); assert.equal((await ok('/api/vouchers/' + a2.id)).number, 'BHT0002');
+    assert.equal((await api('/api/settings', { method: 'PUT', body: { number_prefix_X: 'BH T' } })).status, 400);
+    await ok('/api/vouchers/bulk-delete', { method: 'POST', body: { ids: [a1.id, a2.id] } });
+    await ok('/api/settings', { method: 'PUT', body: { number_prefix_X: 'XK', number_digits: 5 } });
+    step('Số chứng từ tự động: ký hiệu/số chữ số theo cài đặt, tự nhảy số khi trùng');
     // Ghi sổ / bỏ ghi
     const dv = (await ok('/api/vouchers?type=X')).find((v) => v.date === '2026-12-05');
     assert.equal(dv.posted, 1);
@@ -177,6 +190,37 @@ const step = (s) => console.log('✔', s);
     const x = await fetch(B + '/api/reports/nxt.xlsx?from=2026-10&to=2026-11', { headers: { cookie } });
     assert.equal(x.status, 200); assert.ok((await x.arrayBuffer()).byteLength > 1000); step('Xuất Excel NXT');
 
+    // Phân quyền: chỉ Quản trị thêm người dùng; Thủ kho chỉ xem số lượng
+    await ok('/api/users', { method: 'POST', body: { username: 'thukho', password: 'ThuKho2026', full_name: 'Thủ kho', role: 'storekeeper' } });
+    await ok('/api/users', { method: 'POST', body: { username: 'ketoan', password: 'KeToan2026', full_name: 'Kế toán', role: 'accountant' } });
+    const adminCookie = cookie;
+    const loginAs = async (u, pw, newPw) => {
+      cookie = '';
+      await ok('/api/login', { method: 'POST', body: { username: u, password: pw } });
+      await ok('/api/me/password', { method: 'POST', body: { old_password: pw, new_password: newPw } });
+    };
+    await loginAs('ketoan', 'KeToan2026', 'KeToan2027');
+    assert.equal((await api('/api/users', { method: 'POST', body: { username: 'x1', password: 'Abcdef123', role: 'viewer' } })).status, 403);
+    assert.ok((await ok('/api/items'))[0].opening_value !== undefined); // kế toán xem đủ giá trị
+    await loginAs('thukho', 'ThuKho2026', 'ThuKho2027');
+    const MONEY = /"(opening_value|sale_price|sale_price_vat|total_amount|total_cost|total_vat|unit_price|price_vat|amount|cost_price|cost_amount|vat_amount|open_val|in_val|out_val|close_val|avg|price|value|bal_val|amt)"/;
+    const tkItems = await ok('/api/items');
+    assert.ok(tkItems[0].stock_qty !== undefined && tkItems[0].opening_qty !== undefined);
+    for (const url of ['/api/items', '/api/vouchers?type=X', '/api/vouchers?type=N', `/api/vouchers/${pdfV.id}`, '/api/reports/nxt?from=2026-10&to=2026-11', `/api/reports/ledger?item_id=${A.id}&from=2026-10&to=2026-11`, '/api/dashboard']) {
+      const r = await api(url);
+      assert.equal(r.status, 200, url);
+      assert.ok(!MONEY.test(JSON.stringify(r.d)), 'lộ giá trị ở ' + url);
+    }
+    const nxtQ = await ok('/api/reports/nxt?from=2026-10&to=2026-10');
+    assert.equal(nxtQ.rows.find((x) => x.code === 'VT001').out_qty, 120); // vẫn thấy số lượng
+    for (const url of ['/api/reports/analytics?from=2026-10&to=2026-11', '/api/reports/partners?kind=KH', `/api/last-prices?type=X&partner_id=${KH.id}`]) assert.equal((await api(url)).status, 403, url);
+    assert.equal((await api('/api/vouchers', { method: 'POST', body: { type: 'N', date: '2026-12-10', lines: [{ item_id: A.id, qty: 1, unit_price: 1 }] } })).status, 403);
+    assert.equal((await api('/api/users')).status, 403);
+    const xq = await fetch(B + '/api/reports/nxt.xlsx?from=2026-10&to=2026-10', { headers: { cookie } });
+    const wbq = new (require('exceljs').Workbook)(); await wbq.xlsx.load(await xq.arrayBuffer());
+    assert.deepEqual(wbq.worksheets[0].getRow(5).values.slice(1), ['Mã hàng', 'Tên hàng', 'ĐVT', 'Tồn đầu', 'Nhập', 'Xuất', 'Tồn cuối']);
+    cookie = adminCookie;
+    step('Phân quyền: chỉ Quản trị thêm người dùng; Thủ kho chỉ thấy số lượng (máy chủ xóa mọi trường giá trị, chặn báo cáo giá trị)');
     const au = await ok('/api/audit');
     const acts = new Set(au.rows.map((a) => a.action));
     for (const a of ['LOGIN_FAIL', 'LOGIN_OK', 'PASSWORD_CHANGE', 'VOUCHER_CREATE', 'PDF_UPLOAD', 'COSTING_RUN', 'PERIOD_LOCK', 'EXPORT']) assert.ok(acts.has(a), a);

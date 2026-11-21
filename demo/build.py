@@ -34,7 +34,7 @@ assert '#/' not in app
 body = html.split('<body>')[1].split('<script')[0]
 body = hashfix(body)
 body = rep(body, '<button class="btn primary" type="submit">Đăng nhập</button>',
-  '<button class="btn primary" type="submit">Đăng nhập</button>\n      <div class="demo-hint"><b>Tài khoản dùng thử</b><br>Quản trị: <code>admin</code> / <code>admin123</code><br>Kế toán: <code>ketoan</code> / <code>ketoan123</code><br>'
+  '<button class="btn primary" type="submit">Đăng nhập</button>\n      <div class="demo-hint"><b>Tài khoản dùng thử</b><br>Quản trị: <code>admin</code> / <code>admin123</code><br>Kế toán: <code>ketoan</code> / <code>ketoan123</code><br>Thủ kho: <code>thukho</code> / <code>thukho123</code><br>'
   '<span class="muted">Dữ liệu mẫu, lưu trong trình duyệt của bạn.</span> <a href="#" id="demo-reset-login">Nạp lại dữ liệu mẫu</a></div>')
 body = rep(body, '<input name="username" autocomplete="username" required autofocus>', '<input name="username" id="login-user" autocomplete="username" required autofocus value="admin">')
 body = rep(body, '<input name="password" type="password" autocomplete="current-password" required>', '<input name="password" id="login-pass" type="password" autocomplete="current-password" required value="admin123">')
@@ -55,6 +55,7 @@ out = f'''<title>Quản lý kho</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>window.SAMPLE_PDF = "{pdf_b64}";</script>
 <script>
+{(root / 'src' / 'rolefilter.js').read_text()}
 {(root / 'src' / 'analytics.js').read_text()}
 </script>
 <script>

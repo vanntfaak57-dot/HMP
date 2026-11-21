@@ -42,7 +42,8 @@
     D.settings = { company_name: 'Kho hàng ETC MDA', company_address: '', company_tax: '', opening_date: '2026-09-30' };
     const mkUser = (username, full_name, role, pw) => D.users.push({ id: nextId('users'), username, full_name, role, password_hash: hash(pw), active: 1, must_change: 0, failed_count: 0, locked_until: null, created_at: '2026-09-30 08:00:00' });
     mkUser('admin', 'Quản trị hệ thống', 'admin', 'admin123');
-    mkUser('ketoan', 'Nguyễn Thu Hà', 'user', 'ketoan123');
+    mkUser('ketoan', 'Nguyễn Thu Hà', 'accountant', 'ketoan123');
+    mkUser('thukho', 'Trần Văn Kho', 'storekeeper', 'thukho123');
     const items = [
       ['VT001', 'Xi măng PCB40', 'Bao', 100, 8500000, '8'],
       ['VT002', 'Thép cuộn D6', 'Kg', 500, 7500000, '10'],
@@ -87,6 +88,8 @@
     if (!D || !D.users) seed();
     if (/An Phát \(DEMO\)/.test(D.settings.company_name || '')) Object.assign(D.settings, { company_name: 'Kho hàng ETC MDA', company_address: '', company_tax: '' });
     D.partners = D.partners || [];
+    D.users.forEach((u) => { if (u.role === 'user') u.role = 'accountant'; });
+    if (!D.users.some((u) => u.username === 'thukho')) D.users.push({ id: nextId('users'), username: 'thukho', full_name: 'Trần Văn Kho', role: 'storekeeper', password_hash: hash('thukho123'), active: 1, must_change: 0, failed_count: 0, locked_until: null, created_at: '2026-09-30 08:00:00' });
     D.items.forEach((i) => { if (i.vat_rate === undefined) i.vat_rate = null; });
   }
   function resetDemo() { try { localStorage.removeItem(DB_KEY); sessionStorage.removeItem(SID_KEY); } catch { /* bỏ qua */ } D = null; seed(); }
@@ -322,11 +325,13 @@
 
   // ---------------- Các API ----------------
   const TYPE_NAME = { N: 'Phiếu nhập kho', X: 'Phiếu xuất kho bán hàng' };
-  const PREFIX = { N: 'NK', X: 'XK' };
+  const numberingSettings = () => ({ number_prefix_N: D.settings.number_prefix_N ?? 'NK', number_prefix_X: D.settings.number_prefix_X ?? 'XK', number_digits: Number(D.settings.number_digits || 5) });
   function nextNumber(type) {
+    const ns = numberingSettings(); const prefix = ns['number_prefix_' + type];
+    const re = new RegExp('^' + prefix.replace(/[.*+?^${}()|[\]\\/-]/g, '\\$&') + '(\\d+)$', 'i');
     let max = 0;
-    for (const v of D.vouchers) if (v.type === type && v.number.startsWith(PREFIX[type])) { const m = v.number.match(/(\d+)$/); if (m) max = Math.max(max, Number(m[1])); }
-    return PREFIX[type] + String(max + 1).padStart(5, '0');
+    for (const v of D.vouchers) if (v.type === type) { const m = v.number.match(re); if (m) max = Math.max(max, Number(m[1])); }
+    return prefix + String(max + 1).padStart(ns.number_digits, '0');
   }
   const period = (m) => D.periods[m] || null;
   function getVoucher(id) {
@@ -399,7 +404,7 @@
     return { from, to, months, rows };
   }
   const requireRole = (u, ...roles) => { if (!roles.includes(u.role)) throw fail('Bạn không có quyền thực hiện chức năng này', 403); };
-  const W = (u) => requireRole(u, 'admin', 'user');
+  const W = (u) => requireRole(u, ...window.KhoRoles.WRITE_ROLES);
   const ADM = (u) => requireRole(u, 'admin');
 
   const routes = [];
@@ -431,7 +436,7 @@
     user.password_hash = hash(body.new_password); user.must_change = 0;
     audit(user, 'PASSWORD_CHANGE', 'Đổi mật khẩu'); return { ok: true };
   });
-  R('GET', '/api/settings', () => ({ ...D.settings }));
+  R('GET', '/api/settings', () => ({ ...D.settings, ...numberingSettings() }));
   R('PUT', '/api/settings', ({ user, body: b }) => { ADM(user); return tx(() => {
     if (b.opening_date !== undefined && b.opening_date !== D.settings.opening_date) {
       if (!isDate(b.opening_date)) throw fail('Ngày chốt số dư không hợp lệ');
@@ -442,6 +447,16 @@
       Object.values(D.periods).forEach((p) => { p.status = 'dirty'; });
     }
     for (const k of ['company_name', 'company_address', 'company_tax']) if (b[k] !== undefined) D.settings[k] = String(b[k]).slice(0, 300);
+    for (const k of ['number_prefix_N', 'number_prefix_X']) if (b[k] !== undefined) {
+      const v = String(b[k]).trim();
+      if (!/^[A-Za-z0-9._\-/]{0,12}$/.test(v)) throw fail('Ký hiệu số chứng từ chỉ gồm chữ không dấu, số và . _ - / (tối đa 12 ký tự)');
+      D.settings[k] = v;
+    }
+    if (b.number_digits !== undefined) {
+      const d = Number(b.number_digits);
+      if (!Number.isInteger(d) || d < 3 || d > 10) throw fail('Số chữ số của số chứng từ phải từ 3 đến 10');
+      D.settings.number_digits = d;
+    }
     audit(user, 'SETTINGS_UPDATE', JSON.stringify(b)); return { ok: true };
   }); });
 
@@ -607,6 +622,7 @@
   R('GET', '/api/vouchers/:id', ({ params }) => { const v = getVoucher(params.id); if (!v) throw fail('Không tìm thấy chứng từ', 404); return v; });
   R('POST', '/api/vouchers', ({ user, body }) => { W(user);
     const v = validateVoucher(body);
+    if (body.auto_number === true) v.number = nextNumber(v.type);
     if (D.vouchers.some((x) => x.type === v.type && x.number === v.number)) throw fail(`Số phiếu ${v.number} đã tồn tại`);
     const id = tx(() => {
       const id = nextId('vouchers'); const { lines, ...head } = v;
@@ -780,7 +796,7 @@
   R('POST', '/api/users', ({ user, body: b }) => { ADM(user);
     if (!/^[a-zA-Z0-9._-]{3,32}$/.test(b.username || '')) throw fail('Tên đăng nhập 3-32 ký tự, chỉ gồm chữ, số, dấu . _ -');
     const err = validatePassword(b.password); if (err) throw fail(err);
-    if (!['admin', 'user', 'viewer'].includes(b.role)) throw fail('Vai trò không hợp lệ');
+    if (!window.KhoRoles.ROLES[b.role]) throw fail('Vai trò không hợp lệ');
     if (D.users.some((u) => ci(u.username, b.username))) throw fail('Tên đăng nhập đã tồn tại');
     tx(() => D.users.push({ id: nextId('users'), username: b.username, password_hash: hash(b.password), full_name: b.full_name || '', role: b.role, active: 1, must_change: 1, failed_count: 0, locked_until: null, created_at: now() }));
     audit(user, 'USER_CREATE', `${b.username} (${b.role})`); return { ok: true };
@@ -791,7 +807,7 @@
     const changes = [];
     tx(() => {
       if (b.full_name !== undefined) { u.full_name = b.full_name; changes.push('họ tên'); }
-      if (b.role && ['admin', 'user', 'viewer'].includes(b.role)) { u.role = b.role; changes.push('vai trò=' + b.role); }
+      if (b.role && window.KhoRoles.ROLES[b.role]) { u.role = b.role; changes.push('vai trò=' + b.role); }
       if (b.active !== undefined) { u.active = b.active ? 1 : 0; if (!b.active) D.sessions = D.sessions.filter((s) => s.user_id !== u.id); changes.push(b.active ? 'mở khóa' : 'khóa tài khoản'); }
       if (b.password) { const err = validatePassword(b.password); if (err) throw fail(err); Object.assign(u, { password_hash: hash(b.password), must_change: 1, failed_count: 0, locked_until: null }); changes.push('đặt lại mật khẩu'); }
     });
@@ -822,9 +838,10 @@
         if (!rt.open && !user) return json({ error: 'Chưa đăng nhập' }, 401);
         if (user && user.must_change && !['/api/me', '/api/me/password', '/api/logout'].includes(u.pathname)) return json({ error: 'Bạn cần đổi mật khẩu trước khi tiếp tục', must_change: true }, 403);
         const body = opts.body instanceof FormData ? opts.body : opts.body ? JSON.parse(opts.body) : {};
+        if (user && !window.KhoRoles.canSeeValues(user.role) && window.KhoRoles.isValueOnlyPath(u.pathname)) return json({ error: 'Quyền Thủ kho chỉ xem số lượng, không xem được dữ liệu giá trị' }, 403);
         const res = await rt.fn({ user, params: m.groups || {}, query: Object.fromEntries(u.searchParams), body });
         save();
-        return json(res);
+        return json(user && !window.KhoRoles.canSeeValues(user.role) ? window.KhoRoles.strip(res) : res);
       } catch (e) {
         console.warn(e);
         return json({ error: e.message || 'Lỗi không xác định' }, e.status || 400);

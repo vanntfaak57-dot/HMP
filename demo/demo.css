@@ -214,3 +214,7 @@ table.lines input[data-f=unit_price] { min-width: 105px; }
 @media (max-width: 700px) { .form-grid .span2 { grid-column: 1 / -1; } }
 .lp-hint { font-size: 11px; color: var(--muted, #6b7785); white-space: nowrap; margin-top: 2px; text-align: right; }
 .post-state .badge { margin-right: 6px; }
+.auto-tag { font-size: 10px; padding: 0 6px; border-radius: 8px; background: var(--ok-soft, #e3f3e5); color: var(--ok, #2e7d32); margin-left: 4px; }
+input[readonly] { background: var(--panel-2, #eef2f6); }
+.short { font-size: 11px; color: var(--danger, #c62828); font-weight: 600; white-space: nowrap; }
+.no-values .v { display: none !important; }

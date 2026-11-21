@@ -83,7 +83,9 @@ async function boot() {
   } catch { showLogin(); return; }
   $('#login-view').classList.add('hidden');
   $('#app-view').classList.remove('hidden');
-  $('#user-name').textContent = `${ME.full_name || ME.username} (${ME.role})`;
+  $('#user-name').textContent = `${ME.full_name || ME.username} (${ROLE_NAMES[ME.role] || ME.role})`;
+  document.body.classList.toggle('no-values', !canSeeValues());
+  $$('.values-only').forEach((el) => el.classList.toggle('hidden', !canSeeValues()));
   $('#brand').textContent = SETTINGS.company_name || 'Kho hàng ETC MDA';
   $$('.admin-only').forEach((el) => el.classList.toggle('hidden', ME.role !== 'admin'));
   if (ME.must_change) location.hash = '#/account';
@@ -126,7 +128,10 @@ async function route() {
   location.hash = '#/dashboard';
 }
 window.addEventListener('hashchange', route);
-const canWrite = () => ME && ME.role !== 'viewer';
+// Quyền: Quản trị, Kế toán được nhập liệu; Thủ kho chỉ xem số lượng; Chỉ xem: xem toàn bộ, không sửa
+const ROLE_NAMES = { admin: 'Quản trị', accountant: 'Kế toán', storekeeper: 'Thủ kho', viewer: 'Chỉ xem' };
+const canWrite = () => !!ME && (ME.role === 'admin' || ME.role === 'accountant');
+const canSeeValues = () => !!ME && ME.role !== 'storekeeper';
 
 // ---------- Tổng quan ----------
 async function pageDashboard() {
@@ -139,9 +144,9 @@ async function pageDashboard() {
     <div class="cards">
       <div class="card stat"><div class="label">Ngày chốt số dư đầu kỳ</div><div class="value">${fmtD(d.opening_date) || '—'}</div></div>
       <div class="card stat"><div class="label">Số mã vật tư hàng hóa</div><div class="value">${fmtN(d.items)}</div></div>
-      <div class="card stat"><div class="label">Giá trị tồn kho hiện tại (tạm tính)</div><div class="value">${d.stock ? fmtM(d.stock.value) : '—'}</div></div>
-      <div class="card stat"><div class="label">Nhập kho tháng ${d.month}</div><div class="value">${fmtM(N.amt)}</div><div class="muted">${N.c} phiếu</div></div>
-      <div class="card stat"><div class="label">Doanh thu xuất bán tháng ${d.month}</div><div class="value">${fmtM(X.amt)}</div><div class="muted">${X.c} phiếu</div></div>
+      <div class="card stat v"><div class="label">Giá trị tồn kho hiện tại (tạm tính)</div><div class="value">${d.stock ? fmtM(d.stock.value) : '—'}</div></div>
+      <div class="card stat"><div class="label">Nhập kho tháng ${d.month}</div><div class="value">${canSeeValues() ? fmtM(N.amt) : N.c + ' phiếu'}</div><div class="muted">${N.c} phiếu</div></div>
+      <div class="card stat"><div class="label">${canSeeValues() ? 'Doanh thu xuất bán' : 'Xuất kho'} tháng ${d.month}</div><div class="value">${canSeeValues() ? fmtM(X.amt) : X.c + ' phiếu'}</div><div class="muted">${X.c} phiếu</div></div>
     </div>
     <div class="toolbar">${canWrite() ? `<a class="btn primary" href="#/voucher/new/N">+ Phiếu nhập kho</a><a class="btn primary" href="#/voucher/new/X">+ Phiếu xuất kho bán hàng</a>` : ''}</div>
     <h2>Chứng từ mới nhập</h2>
@@ -186,13 +191,14 @@ async function pageItems() {
       ${W ? `<td class="chk-col"><label class="chk"><input type="checkbox" data-sel="${i.id}" aria-label="Chọn ${esc(i.code)}"></label></td>` : ''}
       <td>${esc(i.code)}</td><td>${esc(i.name)}</td><td>${esc(i.unit)}</td>
       <td class="num">${i.vat_rate ? esc(vatLabel(i.vat_rate)) : '<span class="muted">—</span>'}</td>
-      <td class="num">${i.sale_price != null ? fmtN(i.sale_price_vat ?? round2(i.sale_price * (1 + vatPct(i) / 100))) : '<span class="muted">—</span>'}</td>
-      <td class="num">${fmtN(i.opening_qty, 3)}</td><td class="num">${fmtM(i.opening_value)}</td>
-      <td class="num">${i.opening_qty ? fmtN(i.opening_value / i.opening_qty) : ''}</td>
+      <td class="num v">${i.sale_price != null ? fmtN(i.sale_price_vat ?? round2(i.sale_price * (1 + vatPct(i) / 100))) : '<span class="muted">—</span>'}</td>
+      <td class="num">${fmtN(i.opening_qty, 3)}</td><td class="num v">${fmtM(i.opening_value)}</td>
+      <td class="num v">${i.opening_qty ? fmtN(i.opening_value / i.opening_qty) : ''}</td>
       <td class="num">${fmtN(i.stock_qty, 3)}</td>
       <td>${canWrite() ? `<button class="btn small" data-edit="${i.id}">Sửa</button> <button class="btn small danger" data-del="${i.id}">Xóa</button>` : ''}</td></tr>`).join('')
       || `<tr><td colspan="${W ? 11 : 10}" class="muted">Chưa có mã hàng</td></tr>`;
-    $('#items-foot').innerHTML = `<tr><td colspan="${W ? 7 : 6}">Tổng cộng (${list.length} mã)</td><td class="num">${fmtM(tq)}</td><td colspan="3"></td></tr>`;
+    const V = canSeeValues();
+    $('#items-foot').innerHTML = `<tr><td colspan="${(W ? 7 : 6) - (V ? 0 : 1)}">Tổng cộng (${list.length} mã)</td><td class="num v">${fmtM(tq)}</td><td colspan="${V ? 3 : 2}"></td></tr>`;
     updateSelection();
   };
   $('#main').innerHTML = `
@@ -209,7 +215,7 @@ async function pageItems() {
       <a class="btn" href="/api/items/template.xlsx">Tải file Excel mẫu</a>
       <label class="btn">Nhập từ Excel<input type="file" id="item-import" accept=".xlsx" hidden></label>` : ''}
     </div>
-    <div class="table-wrap sticky-head"><table><thead><tr>${W ? '<th class="chk-col"><label class="chk"><input type="checkbox" id="items-all" aria-label="Chọn tất cả" title="Chọn tất cả"></label></th>' : ''}<th>Mã hàng</th><th>Tên hàng</th><th>ĐVT</th><th class="num">Thuế suất GTGT</th><th class="num">Giá bán (+VAT)</th><th class="num">SL tồn đầu</th><th class="num">Giá trị tồn đầu</th><th class="num">Đơn giá đầu kỳ</th><th class="num">SL tồn hiện tại</th><th></th></tr></thead>
+    <div class="table-wrap sticky-head"><table><thead><tr>${W ? '<th class="chk-col"><label class="chk"><input type="checkbox" id="items-all" aria-label="Chọn tất cả" title="Chọn tất cả"></label></th>' : ''}<th>Mã hàng</th><th>Tên hàng</th><th>ĐVT</th><th class="num">Thuế suất GTGT</th><th class="num v">Giá bán (+VAT)</th><th class="num">SL tồn đầu</th><th class="num v">Giá trị tồn đầu</th><th class="num v">Đơn giá đầu kỳ</th><th class="num">SL tồn hiện tại</th><th></th></tr></thead>
     <tbody id="items-body"></tbody><tfoot id="items-foot"></tfoot></table></div>`;
   render();
   $('#items-filter').addEventListener('input', (e) => { filter = e.target.value; render(); });
@@ -327,7 +333,7 @@ async function pageVouchers(type) {
     <div class="table-wrap sticky-head"><table><thead><tr>
       ${W ? '<th class="chk-col"><label class="chk"><input type="checkbox" id="v-all" aria-label="Chọn tất cả" title="Chọn tất cả"></label></th>' : ''}
       <th>Ngày</th><th>Số phiếu</th><th>${type === 'N' ? 'Nhà cung cấp / Người giao' : 'Khách hàng'}</th><th>Diễn giải</th>
-      <th class="num">${type === 'N' ? 'Giá trị nhập' : 'Doanh thu'}</th>${type === 'X' ? '<th class="num">Giá vốn</th>' : ''}<th>Nguồn</th><th>Ghi sổ</th><th>Trạng thái kỳ</th></tr></thead>
+      <th class="num v">${type === 'N' ? 'Giá trị nhập' : 'Doanh thu'}</th>${type === 'X' ? '<th class="num v">Giá vốn</th>' : ''}<th>Nguồn</th><th>Ghi sổ</th><th>Trạng thái kỳ</th></tr></thead>
     <tbody id="v-body"><tr><td colspan="${cols}">Đang tải…</td></tr></tbody><tfoot id="v-foot"></tfoot></table></div>`;
   const updateSelection = () => {
     const visible = new Set(rows.map((v) => v.id));
@@ -364,10 +370,10 @@ async function pageVouchers(type) {
       return `<tr data-id="${v.id}">
         ${W ? `<td class="chk-col"><label class="chk"><input type="checkbox" data-sel="${v.id}" aria-label="Chọn phiếu ${esc(v.number)}"></label></td>` : ''}
         <td>${fmtD(v.date)}</td><td><a href="#/voucher/${v.id}">${esc(v.number)}</a></td><td>${v.partner_code ? `<span class="muted">${esc(v.partner_code)}</span> ` : ''}${esc(v.partner)}</td><td>${esc(v.description)}</td>
-        <td class="num">${fmtM(v.total_amount)}</td>${type === 'X' ? `<td class="num">${v.uncosted ? '<span class="muted">chưa tính</span>' : fmtM(v.total_cost)}</td>` : ''}
+        <td class="num v">${fmtM(v.total_amount)}</td>${type === 'X' ? `<td class="num v">${v.uncosted ? '<span class="muted">chưa tính</span>' : fmtM(v.total_cost)}</td>` : ''}
         <td>${v.source === 'pdf' ? 'PDF' : 'Nhập tay'}</td><td>${v.posted ? '<span class="badge ok">Đã ghi sổ</span>' : '<span class="badge warn">Chưa ghi sổ</span>'}</td><td>${st}</td></tr>`;
     }).join('') || `<tr><td colspan="${cols}" class="muted">Không có chứng từ</td></tr>`;
-    $('#v-foot').innerHTML = `<tr><td colspan="${W ? 5 : 4}">Tổng cộng (${rows.length} phiếu)</td><td class="num">${fmtM(ta)}</td>${type === 'X' ? `<td class="num">${fmtM(tc)}</td>` : ''}<td colspan="3"></td></tr>`;
+    $('#v-foot').innerHTML = `<tr><td colspan="${W ? 5 : 4}">Tổng cộng (${rows.length} phiếu)</td><td class="num v">${fmtM(ta)}</td>${type === 'X' ? `<td class="num v">${fmtM(tc)}</td>` : ''}<td colspan="3"></td></tr>`;
     updateSelection();
   };
   const reload = () => load().catch((e) => toast(e.message, true));
@@ -476,7 +482,7 @@ async function pageVoucherForm(type, id) {
       ${id && canWrite() && !v.locked && posted ? `<button class="btn" id="v-unpost" title="Bỏ ghi để sửa chứng từ">Bỏ ghi</button>` : ''}
       ${id && canWrite() && !v.locked && !posted ? `<button class="btn" id="v-post" title="Ghi sổ lại, không thay đổi nội dung">Ghi sổ</button>` : ''}
       ${id ? `<button class="btn" id="v-print">In phiếu</button>` : ''}
-      ${state.attachment ? `<a class="btn" target="_blank" href="/api/attachments/${state.attachment}">Xem PDF gốc</a>` : ''}
+      ${state.attachment && canSeeValues() ? `<a class="btn" target="_blank" href="/api/attachments/${state.attachment}">Xem PDF gốc</a>` : ''}
     </div>
     ${v.locked ? '<div class="alert">Kỳ kế toán của chứng từ này đã khóa sổ – chỉ xem.</div>'
       : posted ? `<div class="alert info post-state"><span class="badge ok">Đã ghi sổ</span> Chứng từ chỉ xem.${canWrite() ? ' Muốn sửa, bấm <b>Bỏ ghi</b>, sửa xong bấm <b>Cất &amp; ghi sổ</b>.' : ''}</div>`
@@ -486,7 +492,7 @@ async function pageVoucherForm(type, id) {
     <div id="pdf-msg" style="margin-top:10px"></div>
     <div class="card">
       <div class="form-grid" id="v-head">
-        <label>Số phiếu<input name="number" value="${esc(v.number)}"></label>
+        <label>Số phiếu${id ? '' : ' <span class="auto-tag" id="num-tag">tự động</span>'}<span class="pick-row"><input name="number" id="v-number" value="${esc(v.number)}" ${id ? '' : 'readonly'}>${!id && editable ? '<button type="button" class="btn small" id="num-manual" title="Tự nhập số phiếu thay vì đánh số tự động">Sửa</button>' : ''}</span></label>
         <label>Ngày chứng từ<input name="date" type="date" value="${v.date}"></label>
         <label>${X ? 'Khách hàng' : 'Nhà cung cấp'} (chọn trong danh mục)<span class="pick-row"><input name="partner_pick" id="v-partner-pick" list="dl-partners" autocomplete="off" placeholder="Gõ mã hoặc tên…" value="${esc(curPartner ? pickLabel(curPartner) : '')}">
           ${editable ? `<button type="button" class="btn small" id="v-partner-new" title="Thêm ${OBJ} mới vào danh mục">+ Mới</button>` : ''}</span></label>
@@ -504,11 +510,11 @@ async function pageVoucherForm(type, id) {
     </div>
     <div id="unmatched"></div>
     <div class="table-wrap"><table class="lines"><thead><tr><th>#</th><th style="min-width:150px">Mã hàng</th><th>Tên hàng</th><th>ĐVT</th>
-      ${X ? '<th class="num">Tồn kho</th>' : ''}<th class="num">Số lượng</th><th class="num">${X ? 'Đơn giá bán (+VAT)' : 'Đơn giá (+VAT)'}</th><th class="num">${X ? 'Đơn giá bán (-VAT)' : 'Đơn giá (-VAT)'}</th><th class="num">CK (%)</th><th class="num">Thành tiền</th>
-      <th class="num">% thuế GTGT</th><th class="num">Tiền thuế</th>
-      ${X ? '<th class="num">Đơn giá vốn</th><th class="num">Tiền vốn</th>' : ''}<th></th></tr></thead>
+      ${X ? '<th class="num">Tồn kho</th>' : ''}<th class="num">Số lượng</th><th class="num v">${X ? 'Đơn giá bán (+VAT)' : 'Đơn giá (+VAT)'}</th><th class="num v">${X ? 'Đơn giá bán (-VAT)' : 'Đơn giá (-VAT)'}</th><th class="num v">CK (%)</th><th class="num v">Thành tiền</th>
+      <th class="num v">% thuế GTGT</th><th class="num v">Tiền thuế</th>
+      ${X ? '<th class="num v">Đơn giá vốn</th><th class="num v">Tiền vốn</th>' : ''}<th></th></tr></thead>
       <tbody id="l-body"></tbody><tfoot id="l-foot"></tfoot></table></div>
-    <div class="pay-box" id="pay-box"></div>
+    <div class="pay-box v" id="pay-box"></div>
     <datalist id="dl-partners">${kindPartners().map((p) => `<option value="${esc(pickLabel(p))}"></option>`).join('')}</datalist>
     <div id="partner-hint"></div>
     <datalist id="dl-items">${items.map((i) => `<option value="${esc(i.code)}">${esc(i.name)}</option>`).join('')}</datalist>
@@ -518,10 +524,16 @@ async function pageVoucherForm(type, id) {
       ${canWrite() && !v.locked && id ? `<button class="btn danger" id="v-del">Xóa chứng từ</button>` : ''}
       ${editable ? `<button class="btn primary" id="v-save">Cất &amp; ghi sổ</button>` : ''}
     </div>
-    ${X ? `<p class="muted">Giá vốn được tính theo phương pháp <b>bình quân gia quyền cuối kỳ</b> (theo tháng) khi chạy <a href="#/costing">Tính giá xuất kho</a>. ${v.period_status === 'dirty' && id ? '<span class="badge warn">Kỳ này có thay đổi, cần tính lại giá</span>' : ''}</p>` : ''}
+    ${X ? `<p class="muted v">Giá vốn được tính theo phương pháp <b>bình quân gia quyền cuối kỳ</b> (theo tháng) khi chạy <a href="#/costing">Tính giá xuất kho</a>. ${v.period_status === 'dirty' && id ? '<span class="badge warn">Kỳ này có thay đổi, cần tính lại giá</span>' : ''}</p>` : ''}
     ${id ? `<p class="muted">Tạo bởi ${esc(v.created_by)} lúc ${esc(v.created_at)}${v.updated_by ? ` · Sửa lần cuối bởi ${esc(v.updated_by)} lúc ${esc(v.updated_at)}` : ''}</p>` : ''}`;
 
   if (!editable) $$('#v-head input').forEach((i) => { i.disabled = true; });
+  $('#num-manual')?.addEventListener('click', () => {
+    const n = $('#v-number'); n.readOnly = false; n.focus(); n.select();
+    $('#num-tag').textContent = 'nhập tay'; $('#num-manual').remove();
+  });
+  // Số lượng thay đổi: cập nhật cảnh báo thiếu hàng
+  if (X) $('#l-body').addEventListener('change', (e) => { if (e.target.dataset.f === 'qty') setTimeout(renderLines, 0); });
 
   // Chọn đối tượng: điền tên và địa chỉ theo danh mục
   function setPartner(p) {
@@ -559,6 +571,12 @@ async function pageVoucherForm(type, id) {
 
   const byId = (iid) => items.find((i) => i.id == iid);
   const dis = editable ? '' : 'disabled';
+  // Số lượng còn thiếu của một mã hàng trên phiếu xuất (cộng các dòng cùng mã) so với tồn tại ngày chứng từ
+  function shortageOf(itemId) {
+    const it = byId(itemId); if (!it) return 0;
+    const need = lines.filter((x) => x.item_id == itemId).reduce((s, x) => s + (Number(x.qty) || 0), 0);
+    return need - it.stock_qty;
+  }
   function lastHint(l) {
     if (!editable) return '';
     const lp = suggestOf(l);
@@ -574,20 +592,21 @@ async function pageVoucherForm(type, id) {
     const keep = tr0 ? [tr0.dataset.i, ae.dataset.f] : null;
     $('#l-body').innerHTML = lines.map((l, i) => {
       const it = byId(l.item_id);
-      const low = X && it && Number(l.qty) > it.stock_qty + 1e-9;
+      const short = X && it ? shortageOf(l.item_id) : 0;
+      const low = short > 1e-9;
       return `<tr data-i="${i}">
         <td>${i + 1}</td>
         <td><input list="dl-items" data-f="code" value="${esc(it?.code || l._code || '')}" ${dis} placeholder="Gõ mã…"></td>
         <td>${esc(it?.name || '')}</td><td>${esc(it?.unit || '')}</td>
-        ${X ? `<td class="num" style="${low ? 'color:var(--danger);font-weight:600' : ''}">${it ? fmtN(it.stock_qty, 3) : ''}</td>` : ''}
+        ${X ? `<td class="num" style="${low ? 'color:var(--danger);font-weight:600' : ''}">${it ? fmtN(it.stock_qty, 3) : ''}${low ? `<div class="short">Thiếu ${fmtN(short, 3)}</div>` : ''}</td>` : ''}
         <td><input type="number" step="any" data-f="qty" value="${l.qty ?? ''}" ${dis}></td>
-        <td><input type="number" step="any" data-f="price_vat" value="${grossOf(l)}" title="Nhập giá đã có thuế: phần mềm tự tính giá chưa thuế theo % thuế GTGT" ${dis}>${lastHint(l)}</td>
-        <td><input type="number" step="any" data-f="unit_price" value="${l.unit_price ?? ''}" ${dis}></td>
-        <td><input type="number" step="any" min="0" max="100" data-f="discount_rate" class="w-pct" value="${l.discount_rate || ''}" placeholder="0" ${dis}></td>
-        <td><input type="number" step="any" data-f="amount" value="${l.amount ?? ''}" ${dis}></td>
-        <td><select data-f="vat_rate" ${dis}>${VAT_OPTIONS.map(([val, t]) => `<option value="${val}" ${(l.vat_rate ?? '') === val ? 'selected' : ''}>${val === '' ? '—' : /^\d+$/.test(val) ? val + '%' : val}</option>`).join('')}</select></td>
-        <td class="num" data-vat>${fmtM(vatOf(l))}</td>
-        ${X ? `<td class="num">${l.cost_price != null ? fmtN(l.cost_price) : ''}</td><td class="num">${l.cost_amount != null ? fmtM(l.cost_amount) : ''}</td>` : ''}
+        <td class="v"><input type="number" step="any" data-f="price_vat" value="${grossOf(l)}" title="Nhập giá đã có thuế: phần mềm tự tính giá chưa thuế theo % thuế GTGT" ${dis}>${lastHint(l)}</td>
+        <td class="v"><input type="number" step="any" data-f="unit_price" value="${l.unit_price ?? ''}" ${dis}></td>
+        <td class="v"><input type="number" step="any" min="0" max="100" data-f="discount_rate" class="w-pct" value="${l.discount_rate || ''}" placeholder="0" ${dis}></td>
+        <td class="v"><input type="number" step="any" data-f="amount" value="${l.amount ?? ''}" ${dis}></td>
+        <td class="v"><select data-f="vat_rate" ${dis}>${VAT_OPTIONS.map(([val, t]) => `<option value="${val}" ${(l.vat_rate ?? '') === val ? 'selected' : ''}>${val === '' ? '—' : /^\d+$/.test(val) ? val + '%' : val}</option>`).join('')}</select></td>
+        <td class="num v" data-vat>${fmtM(vatOf(l))}</td>
+        ${X ? `<td class="num v">${l.cost_price != null ? fmtN(l.cost_price) : ''}</td><td class="num v">${l.cost_amount != null ? fmtM(l.cost_amount) : ''}</td>` : ''}
         <td>${editable ? `<button class="btn small danger" data-rm="${i}">✕</button>` : ''}</td></tr>`;
     }).join('');
     if (keep && keep[1]) { const el = $(`#l-body tr[data-i="${keep[0]}"] [data-f="${keep[1]}"]`); if (el) el.focus(); }
@@ -598,7 +617,7 @@ async function pageVoucherForm(type, id) {
     const ta = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
     const tv = lines.reduce((s, l) => s + vatOf(l), 0);
     const tc = lines.reduce((s, l) => s + (Number(l.cost_amount) || 0), 0);
-    $('#l-foot').innerHTML = `<tr><td colspan="${X ? 5 : 4}">Tổng cộng</td><td class="num">${fmtN(tq, 3)}</td><td></td><td></td><td></td><td class="num">${fmtM(ta)}</td><td></td><td class="num">${fmtM(tv)}</td>${X ? `<td></td><td class="num">${fmtM(tc)}</td>` : ''}<td></td></tr>`;
+    $('#l-foot').innerHTML = `<tr><td colspan="${X ? 5 : 4}">Tổng cộng</td><td class="num">${fmtN(tq, 3)}</td><td class="v"></td><td class="v"></td><td class="v"></td><td class="num v">${fmtM(ta)}</td><td class="v"></td><td class="num v">${fmtM(tv)}</td>${X ? `<td class="v"></td><td class="num v">${fmtM(tc)}</td>` : ''}<td></td></tr>`;
     $$('#l-body tr').forEach((tr) => { const c = $('[data-vat]', tr); if (c) c.textContent = fmtM(vatOf(lines[tr.dataset.i])); });
     $('#pay-box').innerHTML = `<div><span>Cộng tiền hàng</span><b>${fmtM(ta)}</b></div><div><span>Tiền thuế GTGT</span><b>${fmtM(tv)}</b></div>
       <div class="total"><span>Tổng tiền thanh toán</span><b>${fmtM(ta + tv)}</b></div><div class="words">Bằng chữ: <i>${esc(moneyWords(ta + tv))}</i></div>`;
@@ -687,7 +706,8 @@ async function pageVoucherForm(type, id) {
         state.attachment = p.attachment; state.source = 'pdf';
         if (p.error) { $('#pdf-msg').innerHTML = `<div class="alert">${esc(p.error)}</div>`; return; }
         const head = $('#v-head');
-        if (p.number) head.querySelector('[name=number]').value = p.number;
+        // Số phiếu của app luôn đánh tự động; số trên PDF lưu vào "Số chứng từ gốc"
+        if (p.number) p.ref_no = p.ref_no && p.ref_no !== p.number ? `${p.number} / ${p.ref_no}` : p.number;
         if (p.date) head.querySelector('[name=date]').value = p.date;
         for (const k of ['partner', 'address', 'description', 'ref_no', 'tax_code', 'contact', 'phone', 'delivery_place', 'salesperson', 'warehouse']) {
           const el = head.querySelector(`[name=${k}]`); if (p[k] && el) el.value = p[k];
@@ -724,10 +744,17 @@ async function pageVoucherForm(type, id) {
     head.warehouse = head.warehouse || '';
     const bad = lines.find((l) => l._code);
     if (bad) return toast(`Mã "${bad._code}" không có trong danh mục`, true);
+    if (X) {
+      const shorts = [...new Set(lines.filter((l) => l.item_id).map((l) => l.item_id))].map((iid) => ({ it: byId(iid), s: shortageOf(iid) })).filter((x) => x.s > 1e-9);
+      if (shorts.length) {
+        renderLines();
+        return toast(`Không đủ hàng để xuất (ngày ${fmtD($('#v-head [name=date]').value)}): ${shorts.map((x) => `${x.it.code} thiếu ${fmtN(x.s, 3)} ${x.it.unit || ''}`).join('; ')}`, true);
+      }
+    }
     if (unmatched.length && !confirm(`Còn ${unmatched.length} dòng hàng trong PDF chưa gán mã. Vẫn lưu?`)) return;
     delete head.partner_pick;
     if (!partnerId && $('#v-partner-pick').value.trim()) return toast(`"${$('#v-partner-pick').value}" chưa có trong danh mục ${OBJ}. Chọn lại hoặc bấm "+ Mới".`, true);
-    const body = { ...head, partner_id: partnerId, type, source: state.source, attachment: state.attachment,
+    const body = { ...head, auto_number: !id && $('#v-number').readOnly, partner_id: partnerId, type, source: state.source, attachment: state.attachment,
       lines: lines.filter((l) => l.item_id).map((l) => ({ ...l, price_vat: l.mode === 'gross' && l.price_vat !== '' && l.price_vat != null ? Number(l.price_vat) : null })) };
     try {
       const r = await api(id ? `/api/vouchers/${id}` : '/api/vouchers', { method: id ? 'PUT' : 'POST', body });
@@ -811,6 +838,7 @@ function moneyWords(n) {
 // Mẫu in phiếu xuất kho bán hàng / phiếu nhập kho
 function voucherPaperHtml(v) {
   const X = v.type === 'X';
+  const V = canSeeValues();
   const d = v.date.split('-');
   const f2 = (n) => Number(n || 0).toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const vatTxt = (r) => (r == null || r === '' ? '' : /^\d+$/.test(r) ? r : r);
@@ -845,19 +873,19 @@ function voucherPaperHtml(v) {
     <div class="sub">Mã kho: ${esc(v.warehouse || '')}</div>
     <div class="sub">${X ? 'Số phiếu xuất' : 'Số chứng từ gốc'}: ${esc(v.ref_no || '')}</div>
     <table><thead><tr><th style="width:22px">TT</th><th>Mã hàng</th><th>Tên hàng</th><th>Đơn vị</th><th>Mã kho</th><th>Số lượng</th>
-      <th>Đơn giá (+VAT)</th><th>Đơn giá (-VAT)</th><th>Thành tiền</th><th style="width:42px">Tỷ lệ CK (%)</th><th style="width:44px">% thuế GTGT</th></tr></thead><tbody>
+      ${V ? '<th>Đơn giá (+VAT)</th><th>Đơn giá (-VAT)</th><th>Thành tiền</th><th style="width:42px">Tỷ lệ CK (%)</th><th style="width:44px">% thuế GTGT</th>' : ''}</tr></thead><tbody>
     ${v.lines.map((l, i) => {
       const r = String(l.vat_rate ?? '');
       const withVat = l.price_vat != null ? l.price_vat : /^\d+$/.test(r) ? l.unit_price * (1 + Number(r) / 100) : l.unit_price;
       return `<tr><td class="c">${i + 1}</td><td>${esc(l.code)}</td><td>${esc(l.name)}</td><td class="c">${esc(l.unit)}</td><td class="c">${esc(v.warehouse || '')}</td>
-        <td class="r">${fmtN(l.qty, 3)}</td><td class="r">${f2(withVat)}</td><td class="r">${f2(l.unit_price)}</td><td class="r">${fmtM(l.amount)}</td>
-        <td class="r">${f2(l.discount_rate)}</td><td class="r">${esc(vatTxt(l.vat_rate))}</td></tr>`;
+        <td class="r">${fmtN(l.qty, 3)}</td>${V ? `<td class="r">${f2(withVat)}</td><td class="r">${f2(l.unit_price)}</td><td class="r">${fmtM(l.amount)}</td>
+        <td class="r">${f2(l.discount_rate)}</td><td class="r">${esc(vatTxt(l.vat_rate))}</td>` : ''}</tr>`;
     }).join('')}
-    <tr><td colspan="8"><b>Cộng</b></td><td class="r"><b>${fmtM(goods)}</b></td><td></td><td></td></tr></tbody></table>
-    <table class="box"><tr><td style="width:42%"></td><td colspan="2" style="width:38%">Cộng tiền hàng</td><td class="r"><b>${fmtM(goods)}</b></td></tr>
+    ${V ? `<tr><td colspan="8"><b>Cộng</b></td><td class="r"><b>${fmtM(goods)}</b></td><td></td><td></td></tr>` : `<tr><td colspan="5"><b>Cộng</b></td><td class="r"><b>${fmtN(v.lines.reduce((t, l) => t + Number(l.qty || 0), 0), 3)}</b></td></tr>`}</tbody></table>
+    ${V ? `<table class="box"><tr><td style="width:42%"></td><td colspan="2" style="width:38%">Cộng tiền hàng</td><td class="r"><b>${fmtM(goods)}</b></td></tr>
       <tr><td>Thuế suất thuế GTGT: <b style="margin-left:30%">${esc(rateTxt)}</b></td><td colspan="2"><b>Tiền thuế GTGT:</b></td><td class="r"><b>${fmtM(vat)}</b></td></tr>
       <tr><td></td><td colspan="2">Tổng tiền thanh toán</td><td class="r"><b>${fmtM(goods + vat)}</b></td></tr></table>
-    <div class="words">Số tiền bằng chữ: <i>${esc(moneyWords(goods + vat))}</i></div>
+    <div class="words">Số tiền bằng chữ: <i>${esc(moneyWords(goods + vat))}</i></div>` : ''}
     <div class="words" style="margin-top:4px">Số chứng từ gốc kèm theo:</div><div>...</div>
     <div class="datel">Ngày ..... tháng ..... năm ........</div>
     <div class="sig">${(X ? ['Người nhận hàng', 'Người giao hàng', 'Thủ kho', 'Người lập phiếu'] : ['Người giao hàng', 'Người nhận hàng', 'Thủ kho', 'Người lập phiếu'])
@@ -915,18 +943,19 @@ async function pageNXT() {
     sessionStorage.setItem('nxt', JSON.stringify(f));
     const r = await api(`/api/reports/nxt?from=${f.from}&to=${f.to}`);
     const hide = $('#r-hide').checked;
+    const V = canSeeValues();
     const rows = r.rows.filter((x) => !hide || x.open_qty || x.in_qty || x.out_qty || x.close_qty);
     const t = rows.reduce((a, x) => { ['open_val', 'in_val', 'out_val', 'close_val'].forEach((k) => { a[k] += x[k]; }); return a; }, { open_val: 0, in_val: 0, out_val: 0, close_val: 0 });
     $('#r-out').innerHTML = `<p class="muted">Kỳ ${r.from} → ${r.to}. Giá xuất: bình quân gia quyền cuối kỳ (tính trực tiếp theo dữ liệu hiện tại).</p>
     <div class="table-wrap"><table><thead><tr><th rowspan="2">Mã hàng</th><th rowspan="2">Tên hàng</th><th rowspan="2">ĐVT</th>
-      <th colspan="2" class="num" style="text-align:center">Tồn đầu kỳ</th><th colspan="2" style="text-align:center">Nhập trong kỳ</th><th colspan="2" style="text-align:center">Xuất trong kỳ</th>
-      <th colspan="2" style="text-align:center">Tồn cuối kỳ</th><th rowspan="2" class="num">Đơn giá BQ</th></tr>
-      <tr>${'<th class="num">SL</th><th class="num">Giá trị</th>'.repeat(4)}</tr></thead><tbody>
+      <th colspan="${V ? 2 : 1}" class="num" style="text-align:center">Tồn đầu kỳ</th><th colspan="${V ? 2 : 1}" style="text-align:center">Nhập trong kỳ</th><th colspan="${V ? 2 : 1}" style="text-align:center">Xuất trong kỳ</th>
+      <th colspan="${V ? 2 : 1}" style="text-align:center">Tồn cuối kỳ</th><th rowspan="2" class="num v">Đơn giá BQ</th></tr>
+      <tr>${'<th class="num">SL</th><th class="num v">Giá trị</th>'.repeat(4)}</tr></thead><tbody>
     ${rows.map((x) => `<tr><td><a href="#/ledger" data-led="${x.item_id}">${esc(x.code)}</a></td><td>${esc(x.name)}</td><td>${esc(x.unit)}</td>
-      <td class="num">${fmtN(x.open_qty, 3)}</td><td class="num">${fmtM(x.open_val)}</td><td class="num">${fmtN(x.in_qty, 3)}</td><td class="num">${fmtM(x.in_val)}</td>
-      <td class="num">${fmtN(x.out_qty, 3)}</td><td class="num">${fmtM(x.out_val)}</td><td class="num">${fmtN(x.close_qty, 3)}</td><td class="num">${fmtM(x.close_val)}</td>
-      <td class="num">${fmtN(x.avg)}</td></tr>`).join('')}</tbody>
-    <tfoot><tr><td colspan="3">Tổng cộng</td><td></td><td class="num">${fmtM(t.open_val)}</td><td></td><td class="num">${fmtM(t.in_val)}</td><td></td><td class="num">${fmtM(t.out_val)}</td><td></td><td class="num">${fmtM(t.close_val)}</td><td></td></tr></tfoot></table></div>`;
+      <td class="num">${fmtN(x.open_qty, 3)}</td><td class="num v">${fmtM(x.open_val)}</td><td class="num">${fmtN(x.in_qty, 3)}</td><td class="num v">${fmtM(x.in_val)}</td>
+      <td class="num">${fmtN(x.out_qty, 3)}</td><td class="num v">${fmtM(x.out_val)}</td><td class="num">${fmtN(x.close_qty, 3)}</td><td class="num v">${fmtM(x.close_val)}</td>
+      <td class="num v">${fmtN(x.avg)}</td></tr>`).join('')}</tbody>
+    <tfoot><tr><td colspan="3">Tổng cộng</td><td></td><td class="num v">${fmtM(t.open_val)}</td><td></td><td class="num v">${fmtM(t.in_val)}</td><td></td><td class="num v">${fmtM(t.out_val)}</td><td></td><td class="num v">${fmtM(t.close_val)}</td><td class="v"></td></tr></tfoot></table></div>`;
   };
   $('#r-go').addEventListener('click', () => load().catch((e) => toast(e.message, true)));
   $('#r-hide').addEventListener('change', () => load().catch((e) => toast(e.message, true)));
@@ -951,20 +980,21 @@ async function pageLedger() {
     const f = { item_id: $('#lg-item').value, from: $('#lg-from').value, to: $('#lg-to').value };
     if (!f.item_id) return;
     sessionStorage.setItem('ledger', JSON.stringify(f));
+    const V = canSeeValues();
     const r = await api(`/api/reports/ledger?item_id=${f.item_id}&from=${f.from}&to=${f.to}`);
     $('#lg-out').innerHTML = `<p><b>${esc(r.item.code)} – ${esc(r.item.name)}</b> (ĐVT: ${esc(r.item.unit)})</p>
-      <div class="table-wrap"><table><thead><tr><th>Ngày</th><th>Số phiếu</th><th>Diễn giải</th><th class="num">Đơn giá</th>
-        <th class="num">SL nhập</th><th class="num">GT nhập</th><th class="num">SL xuất</th><th class="num">GT xuất</th><th class="num">SL tồn</th><th class="num">GT tồn</th></tr></thead><tbody>
-      <tr><td colspan="8"><i>Số dư đầu kỳ</i></td><td class="num">${fmtN(r.open_qty, 3)}</td><td class="num">${fmtM(r.open_val)}</td></tr>
+      <div class="table-wrap"><table><thead><tr><th>Ngày</th><th>Số phiếu</th><th>Diễn giải</th><th class="num v">Đơn giá</th>
+        <th class="num">SL nhập</th><th class="num v">GT nhập</th><th class="num">SL xuất</th><th class="num v">GT xuất</th><th class="num">SL tồn</th><th class="num v">GT tồn</th></tr></thead><tbody>
+      <tr><td colspan="${V ? 8 : 5}"><i>Số dư đầu kỳ</i></td><td class="num">${fmtN(r.open_qty, 3)}</td><td class="num v">${fmtM(r.open_val)}</td></tr>
       ${r.lines.map((l) => `<tr><td>${fmtD(l.date)}</td><td><a href="#/voucher/${l.voucher_id}">${esc(l.number)}</a></td><td>${esc(l.partner || l.description)}</td>
-        <td class="num">${fmtN(l.price)}</td>
-        ${l.type === 'N' ? `<td class="num">${fmtN(l.qty, 3)}</td><td class="num">${fmtM(l.value)}</td><td></td><td></td>` : `<td></td><td></td><td class="num">${fmtN(l.qty, 3)}</td><td class="num">${fmtM(l.value)}</td>`}
-        <td class="num">${fmtN(l.bal_qty, 3)}</td><td class="num">${fmtM(l.bal_val)}</td></tr>`).join('')}
+        <td class="num v">${fmtN(l.price)}</td>
+        ${l.type === 'N' ? `<td class="num">${fmtN(l.qty, 3)}</td><td class="num v">${fmtM(l.value)}</td><td></td><td class="v"></td>` : `<td></td><td class="v"></td><td class="num">${fmtN(l.qty, 3)}</td><td class="num v">${fmtM(l.value)}</td>`}
+        <td class="num">${fmtN(l.bal_qty, 3)}</td><td class="num v">${fmtM(l.bal_val)}</td></tr>`).join('')}
       </tbody></table></div>
       <h2>Đơn giá bình quân từng kỳ</h2>
-      <div class="table-wrap"><table><thead><tr><th>Kỳ</th><th class="num">SL tồn đầu</th><th class="num">GT tồn đầu</th><th class="num">SL nhập</th><th class="num">GT nhập</th><th class="num">Đơn giá BQ</th><th class="num">SL xuất</th><th class="num">GT xuất</th><th class="num">SL tồn cuối</th><th class="num">GT tồn cuối</th></tr></thead><tbody>
-      ${r.months.map((m) => `<tr><td>${m.month}</td><td class="num">${fmtN(m.open_qty, 3)}</td><td class="num">${fmtM(m.open_val)}</td><td class="num">${fmtN(m.in_qty, 3)}</td><td class="num">${fmtM(m.in_val)}</td>
-        <td class="num"><b>${fmtN(m.avg)}</b></td><td class="num">${fmtN(m.out_qty, 3)}</td><td class="num">${fmtM(m.out_val)}</td><td class="num">${fmtN(m.close_qty, 3)}</td><td class="num">${fmtM(m.close_val)}</td></tr>`).join('')}
+      <div class="table-wrap"><table><thead><tr><th>Kỳ</th><th class="num">SL tồn đầu</th><th class="num v">GT tồn đầu</th><th class="num">SL nhập</th><th class="num v">GT nhập</th><th class="num v">Đơn giá BQ</th><th class="num">SL xuất</th><th class="num v">GT xuất</th><th class="num">SL tồn cuối</th><th class="num v">GT tồn cuối</th></tr></thead><tbody>
+      ${r.months.map((m) => `<tr><td>${m.month}</td><td class="num">${fmtN(m.open_qty, 3)}</td><td class="num v">${fmtM(m.open_val)}</td><td class="num">${fmtN(m.in_qty, 3)}</td><td class="num v">${fmtM(m.in_val)}</td>
+        <td class="num v"><b>${fmtN(m.avg)}</b></td><td class="num">${fmtN(m.out_qty, 3)}</td><td class="num v">${fmtM(m.out_val)}</td><td class="num">${fmtN(m.close_qty, 3)}</td><td class="num v">${fmtM(m.close_val)}</td></tr>`).join('')}
       </tbody></table></div>`;
   };
   $('#lg-go').addEventListener('click', () => load().catch((e) => toast(e.message, true)));
@@ -975,7 +1005,7 @@ async function pageLedger() {
 async function pageUsers() {
   const users = await api('/api/users');
   const sessions = await api('/api/sessions');
-  const ROLE = { admin: 'Quản trị', user: 'Kế toán / thủ kho', viewer: 'Chỉ xem' };
+  const ROLE = ROLE_NAMES;
   $('#main').innerHTML = `<h1>Người dùng</h1>
     <div class="toolbar"><span class="spacer"></span><button class="btn primary" id="u-add">+ Thêm người dùng</button></div>
     <div class="table-wrap"><table><thead><tr><th>Tên đăng nhập</th><th>Họ tên</th><th>Vai trò</th><th>Trạng thái</th><th>Đăng nhập gần nhất</th><th class="num">Phiên đang mở</th><th></th></tr></thead><tbody>
@@ -1049,11 +1079,22 @@ async function pageSettings() {
     <label class="wide">Địa chỉ<input name="company_address" value="${esc(s.company_address)}"></label>
     <label>Mã số thuế<input name="company_tax" value="${esc(s.company_tax)}"></label>
     <label>Ngày chốt số dư đầu kỳ (ngày A)<input type="date" name="opening_date" value="${esc(s.opening_date || '')}"></label>
+    <h2 class="wide" style="margin:12px 0 0">Số chứng từ tự động</h2>
+    <label>Ký hiệu phiếu nhập kho<input name="number_prefix_N" value="${esc(s.number_prefix_N)}" maxlength="12"></label>
+    <label>Ký hiệu phiếu xuất kho bán hàng<input name="number_prefix_X" value="${esc(s.number_prefix_X)}" maxlength="12"></label>
+    <label>Số chữ số<input name="number_digits" type="number" min="3" max="10" value="${esc(s.number_digits)}"></label>
+    <p class="muted wide" style="margin:0" id="num-preview"></p>
     </form><p class="muted">Số dư tồn kho nhập trong danh mục vật tư là số dư cuối ngày A. Mọi chứng từ phải có ngày sau ngày A. Không đổi được ngày A khi đã có chứng từ trước ngày đó hoặc đã khóa sổ.</p>
     <button class="btn primary" id="s-save">Lưu cài đặt</button></div>`;
+  const preview = () => {
+    const d = Number($('[name=number_digits]').value) || 5;
+    $('#num-preview').textContent = `Ví dụ: phiếu nhập ${$('[name=number_prefix_N]').value}${'1'.padStart(d, '0')}, phiếu xuất ${$('[name=number_prefix_X]').value}${'1'.padStart(d, '0')}. Số tiếp theo = số lớn nhất đang có cùng ký hiệu + 1.`;
+  };
+  $$('#s-form [name^=number_]').forEach((i) => i.addEventListener('input', preview)); preview();
   $('#s-save').addEventListener('click', async () => {
     const body = Object.fromEntries(new FormData($('#s-form')));
     if (!body.opening_date) delete body.opening_date;
+    body.number_digits = Number(body.number_digits);
     try { await api('/api/settings', { method: 'PUT', body }); toast('Đã lưu'); await boot(); } catch (err) { toast(err.message, true); }
   });
 }

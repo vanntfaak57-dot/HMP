@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS users (
   username TEXT NOT NULL UNIQUE COLLATE NOCASE,
   password_hash TEXT NOT NULL,
   full_name TEXT,
-  role TEXT NOT NULL DEFAULT 'user',          -- admin | user | viewer
+  role TEXT NOT NULL DEFAULT 'accountant',    -- admin | accountant | storekeeper | viewer
   active INTEGER NOT NULL DEFAULT 1,
   must_change INTEGER NOT NULL DEFAULT 0,
   failed_count INTEGER NOT NULL DEFAULT 0,
@@ -201,6 +201,9 @@ for (const [table, col, def] of [
 ]) {
   if (!db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
 }
+
+// Vai trò: admin (Quản trị) | accountant (Kế toán) | storekeeper (Thủ kho) | viewer (Chỉ xem)
+db.exec("UPDATE users SET role = 'accountant' WHERE role = 'user'");
 
 // Tên đơn vị mặc định (đổi được trong Cài đặt)
 if (!getSetting('company_name')) setSetting('company_name', 'Kho hàng ETC MDA');

@@ -1,9 +1,24 @@
 // Ứng dụng Quản lý kho - máy chủ
 process.env.TZ = process.env.TZ || 'Asia/Ho_Chi_Minh';
-const express = require('express');
-const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+
+// Chạy dạng app đóng gói (1 file KhoETC.exe): dữ liệu nằm trong thư mục "data" cạnh file chạy,
+// có thể đặt cổng / địa chỉ trong file kho-config.json cạnh file chạy: { "port": 3000, "host": "127.0.0.1" }
+let sea = null;
+try { sea = require('node:sea'); if (!sea.isSea()) sea = null; } catch { sea = null; }
+if (sea) {
+  process.removeAllListeners('warning'); // ẩn cảnh báo "SQLite is an experimental feature"
+  const baseDir = path.dirname(process.execPath);
+  process.env.DATA_DIR = process.env.DATA_DIR || path.join(baseDir, 'data');
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(baseDir, 'kho-config.json'), 'utf8'));
+    if (cfg.port && !process.env.PORT) process.env.PORT = String(cfg.port);
+    if (cfg.host && !process.env.HOST) process.env.HOST = String(cfg.host);
+  } catch { /* không có file cấu hình: dùng mặc định */ }
+}
+const express = require('express');
+const multer = require('multer');
 const crypto = require('crypto');
 const ExcelJS = require('exceljs');
 
@@ -13,8 +28,17 @@ const { audit, requireAuth, requireRole } = auth;
 const costing = require('./src/costing');
 const { parsePdf } = require('./src/pdfparser');
 const analytics = require('./src/analytics');
+const roles = require('./src/rolefilter');
 
 auth.ensureAdmin();
+// Quên mật khẩu admin: chạy  KhoETC.exe --reset-admin  (hoặc node server.js --reset-admin)
+if (process.argv.includes('--reset-admin')) {
+  db.prepare("UPDATE users SET password_hash = ?, must_change = 1, active = 1, failed_count = 0, locked_until = NULL WHERE username = 'admin'").run(auth.hashPassword('admin@123'));
+  db.prepare("DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = 'admin')").run();
+  db.prepare('INSERT INTO audit_log(ts, username, action, detail, ip, ua) VALUES (?,?,?,?,?,?)').run(now(), 'admin', 'USER_UPDATE', 'Đặt lại mật khẩu admin bằng lệnh --reset-admin', 'máy chủ', '');
+  console.log('Đã đặt lại mật khẩu tài khoản admin thành: admin@123 (bắt buộc đổi khi đăng nhập).');
+  process.exit(0);
+}
 
 const app = express();
 app.disable('x-powered-by');
@@ -25,7 +49,21 @@ app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'no-referrer');
   next();
 });
-app.use(express.static(path.join(__dirname, 'public')));
+if (sea) {
+  // Giao diện được nhúng bên trong file chạy
+  const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
+  app.use((req, res, next) => {
+    if (req.method !== 'GET' || req.path.startsWith('/api/')) return next();
+    const name = req.path === '/' ? '/index.html' : req.path;
+    let buf;
+    try { buf = sea.getAsset('public' + name); } catch { return next(); }
+    res.setHeader('Content-Type', MIME[path.extname(name)] || 'application/octet-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.end(Buffer.from(buf));
+  });
+} else {
+  app.use(express.static(path.join(__dirname, 'public')));
+}
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
 
@@ -40,7 +78,7 @@ const fail = (msg, status = 400) => Object.assign(new Error(msg), { status });
 const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
 const isMonth = (s) => /^\d{4}-\d{2}$/.test(String(s || ''));
-const canWrite = requireRole('admin', 'user');
+const canWrite = requireRole(...roles.WRITE_ROLES); // Quản trị, Kế toán
 const adminOnly = requireRole('admin');
 
 // Thuế suất thuế GTGT: 0%, 5%, 8%, 10%, KCT (không chịu thuế), KKKNT (không kê khai, tính nộp thuế)
@@ -57,6 +95,14 @@ function normVat(v) {
 // ---------------- Đăng nhập ----------------
 app.post('/api/login', h(auth.login));
 app.use('/api', requireAuth);
+// Thủ kho: chỉ xem số lượng. Chặn các báo cáo giá trị và xóa mọi trường tiền khỏi dữ liệu trả về.
+app.use('/api', (req, res, next) => {
+  if (roles.canSeeValues(req.user.role)) return next();
+  if (roles.isValueOnlyPath(req.baseUrl + req.path)) return res.status(403).json({ error: 'Quyền Thủ kho chỉ xem số lượng, không xem được dữ liệu giá trị' });
+  const orig = res.json.bind(res);
+  res.json = (d) => orig(d && d.error ? d : roles.strip(d));
+  next();
+});
 app.post('/api/logout', h(auth.logout));
 app.get('/api/me', (req, res) => res.json({
   user: auth.publicUser(req.user),
@@ -77,6 +123,7 @@ app.post('/api/me/password', h((req, res) => {
 app.get('/api/settings', (req, res) => res.json({
   company_name: getSetting('company_name', ''), company_address: getSetting('company_address', ''),
   company_tax: getSetting('company_tax', ''), opening_date: getSetting('opening_date'),
+  ...numberingSettings(),
 }));
 app.put('/api/settings', adminOnly, h((req, res) => {
   const b = req.body || {};
@@ -90,6 +137,16 @@ app.put('/api/settings', adminOnly, h((req, res) => {
     db.prepare("UPDATE periods SET status = 'dirty'").run();
   }
   for (const k of ['company_name', 'company_address', 'company_tax']) if (b[k] !== undefined) setSetting(k, String(b[k]).slice(0, 300));
+  for (const k of ['number_prefix_N', 'number_prefix_X']) if (b[k] !== undefined) {
+    const v = String(b[k]).trim();
+    if (!/^[A-Za-z0-9._\-/]{0,12}$/.test(v)) throw fail('Ký hiệu số chứng từ chỉ gồm chữ không dấu, số và . _ - / (tối đa 12 ký tự)');
+    setSetting(k, v);
+  }
+  if (b.number_digits !== undefined) {
+    const d = Number(b.number_digits);
+    if (!Number.isInteger(d) || d < 3 || d > 10) throw fail('Số chữ số của số chứng từ phải từ 3 đến 10');
+    setSetting('number_digits', String(d));
+  }
   audit(req, 'SETTINGS_UPDATE', JSON.stringify(b));
   res.json({ ok: true });
 }));
@@ -343,13 +400,18 @@ function matchPartner(type, taxCode, name) {
 
 // ---------------- Chứng từ nhập / xuất ----------------
 const TYPE_NAME = { N: 'Phiếu nhập kho', X: 'Phiếu xuất kho bán hàng' };
-const PREFIX = { N: 'NK', X: 'XK' };
+// Số chứng từ tự động: <ký hiệu><số thứ tự>, ví dụ NK00001, XK00001 (ký hiệu và số chữ số chỉnh trong Cài đặt)
+function numberingSettings() {
+  return { number_prefix_N: getSetting('number_prefix_N', 'NK'), number_prefix_X: getSetting('number_prefix_X', 'XK'), number_digits: Number(getSetting('number_digits', '5')) };
+}
 
 function nextNumber(type) {
-  const rows = db.prepare('SELECT number FROM vouchers WHERE type = ? AND number LIKE ?').all(type, PREFIX[type] + '%');
+  const ns = numberingSettings();
+  const prefix = ns['number_prefix_' + type];
+  const re = new RegExp('^' + prefix.replace(/[.*+?^${}()|[\]\\/-]/g, '\\$&') + '(\\d+)$', 'i');
   let max = 0;
-  for (const r of rows) { const m = r.number.match(/(\d+)$/); if (m) max = Math.max(max, Number(m[1])); }
-  return PREFIX[type] + String(max + 1).padStart(5, '0');
+  for (const r of db.prepare('SELECT number FROM vouchers WHERE type = ?').all(type)) { const m = r.number.match(re); if (m) max = Math.max(max, Number(m[1])); }
+  return prefix + String(max + 1).padStart(ns.number_digits, '0');
 }
 app.get('/api/vouchers/next-number', (req, res) => res.json({ number: nextNumber(req.query.type === 'X' ? 'X' : 'N') }));
 
@@ -437,6 +499,8 @@ const summary = (v) => `${TYPE_NAME[v.type]} ${v.number} ngày ${v.date}, ${v.li
 
 app.post('/api/vouchers', canWrite, h((req, res) => {
   const v = validateVoucher(req.body || {});
+  // Số tự động: luôn lấy số kế tiếp tại thời điểm lưu (tránh trùng khi nhiều người cùng lập phiếu)
+  if (req.body?.auto_number === true) v.number = nextNumber(v.type);
   if (db.prepare('SELECT id FROM vouchers WHERE type = ? AND number = ?').get(v.type, v.number)) throw fail(`Số phiếu ${v.number} đã tồn tại`);
   const id = tx(() => {
     const r = db.prepare(`INSERT INTO vouchers(type, number, date, partner_id, partner, address, description, ref_no, source, attachment, created_by, created_at)
@@ -658,6 +722,22 @@ app.get('/api/reports/nxt.xlsx', h(async (req, res) => {
   const rep = nxtReport(from, to);
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('NXT');
+  if (!roles.canSeeValues(req.user.role)) {
+    // Thủ kho: chỉ xuất số lượng
+    ws.addRow([getSetting('company_name', '')]);
+    ws.addRow(['BÁO CÁO TỔNG HỢP NHẬP - XUẤT - TỒN KHO (SỐ LƯỢNG)']);
+    ws.addRow([`Kỳ: ${from} đến ${to}`]);
+    ws.addRow([]);
+    ws.addRow(['Mã hàng', 'Tên hàng', 'ĐVT', 'Tồn đầu', 'Nhập', 'Xuất', 'Tồn cuối']).font = { bold: true };
+    for (const r of rep.rows) ws.addRow([r.code, r.name, r.unit, r.open_qty, r.in_qty, r.out_qty, r.close_qty]);
+    ws.columns.forEach((c, i) => { c.width = i === 1 ? 35 : 14; if (i >= 3) c.numFmt = '#,##0.###'; });
+    ws.getRow(2).font = { bold: true, size: 14 };
+    audit(req, 'EXPORT', `Xuất Excel báo cáo NXT (số lượng) ${from} - ${to}`);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="NXT_SL_${from}_${to}.xlsx"`);
+    await wb.xlsx.write(res);
+    return res.end();
+  }
   ws.addRow([getSetting('company_name', '')]);
   ws.addRow(['BÁO CÁO TỔNG HỢP NHẬP - XUẤT - TỒN KHO']);
   ws.addRow([`Kỳ: ${from} đến ${to} — Giá xuất kho: Bình quân gia quyền cuối kỳ`]);
@@ -756,7 +836,7 @@ app.post('/api/users', adminOnly, h((req, res) => {
   if (!/^[a-zA-Z0-9._-]{3,32}$/.test(b.username || '')) throw fail('Tên đăng nhập 3-32 ký tự, chỉ gồm chữ, số, dấu . _ -');
   const err = auth.validatePassword(b.password);
   if (err) throw fail(err);
-  if (!['admin', 'user', 'viewer'].includes(b.role)) throw fail('Vai trò không hợp lệ');
+  if (!roles.ROLES[b.role]) throw fail('Vai trò không hợp lệ');
   if (db.prepare('SELECT id FROM users WHERE username = ?').get(b.username)) throw fail('Tên đăng nhập đã tồn tại');
   db.prepare('INSERT INTO users(username, password_hash, full_name, role, must_change, created_at) VALUES (?,?,?,?,1,?)')
     .run(b.username, auth.hashPassword(b.password), b.full_name || '', b.role, now());
@@ -770,7 +850,7 @@ app.put('/api/users/:id', adminOnly, h((req, res) => {
   if (u.id === req.user.id && (b.active === false || (b.role && b.role !== 'admin'))) throw fail('Không thể tự khóa hoặc hạ quyền chính mình');
   const changes = [];
   if (b.full_name !== undefined) { db.prepare('UPDATE users SET full_name = ? WHERE id = ?').run(b.full_name, u.id); changes.push('họ tên'); }
-  if (b.role && ['admin', 'user', 'viewer'].includes(b.role)) { db.prepare('UPDATE users SET role = ? WHERE id = ?').run(b.role, u.id); changes.push('vai trò=' + b.role); }
+  if (b.role && roles.ROLES[b.role]) { db.prepare('UPDATE users SET role = ? WHERE id = ?').run(b.role, u.id); changes.push('vai trò=' + b.role); }
   if (b.active !== undefined) {
     db.prepare('UPDATE users SET active = ? WHERE id = ?').run(b.active ? 1 : 0, u.id);
     if (!b.active) db.prepare('DELETE FROM sessions WHERE user_id = ?').run(u.id);
@@ -809,4 +889,28 @@ app.use('/api', (req, res) => res.status(404).json({ error: 'Không tìm thấy'
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '127.0.0.1';
-app.listen(PORT, HOST, () => console.log(`Ứng dụng Quản lý kho đang chạy: http://${HOST}:${PORT}`));
+function openBrowser(url) {
+  const { exec } = require('child_process');
+  const cmd = process.platform === 'win32' ? `start "" "${url}"` : process.platform === 'darwin' ? `open "${url}"` : `xdg-open "${url}"`;
+  exec(cmd, () => {});
+}
+const localUrl = `http://${HOST === '0.0.0.0' ? '127.0.0.1' : HOST}:${PORT}`;
+const server = app.listen(PORT, HOST, (err) => {
+  if (err) return; // Express 5 gọi lại cả khi lỗi (cổng bận): xử lý ở server.on('error')
+  console.log(`Ứng dụng Quản lý kho đang chạy: http://${HOST}:${PORT}`);
+  if (sea) {
+    console.log(`\n  ${getSetting('company_name', 'Quản lý kho')}\n  Mở trình duyệt tại: ${localUrl}\n  Dữ liệu lưu tại:   ${process.env.DATA_DIR}\n\n  KHÔNG đóng cửa sổ này trong khi đang dùng phần mềm.\n`);
+    if (process.env.NO_BROWSER !== '1') openBrowser(localUrl);
+  }
+});
+server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') {
+    // Đã có một cửa sổ phần mềm đang chạy: chỉ mở lại trình duyệt
+    console.log(`Phần mềm đã đang chạy ở cổng ${PORT}. Đang mở trình duyệt...`);
+    if (sea && process.env.NO_BROWSER !== '1') openBrowser(localUrl);
+    setTimeout(() => process.exit(0), 3000);
+  } else {
+    console.error(e);
+    process.exit(1);
+  }
+});

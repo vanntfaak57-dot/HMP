@@ -1,14 +1,17 @@
 // Đọc file PDF phiếu xuất kho / phiếu nhập kho / hóa đơn và nhận diện nội dung
 // Lưu ý: chỉ đọc được PDF có lớp chữ (xuất từ phần mềm). PDF dạng ảnh scan cần OCR trước.
-const pdf = require('pdf-parse/lib/pdf-parse.js');
+// Dùng thẳng bản pdf.js đi kèm pdf-parse (đường dẫn cố định để đóng gói được thành 1 file chạy)
+const PDFJS = require('pdf-parse/lib/pdf.js/v1.10.100/build/pdf.js');
+PDFJS.disableWorker = true;
 const { db } = require('./db');
 
 // Ghép các mẩu chữ theo tọa độ thành dòng, các ô cách nhau bằng ký tự TAB
 async function extractLines(buffer) {
   const pages = [];
-  await pdf(buffer, {
-    max: 20,
-    pagerender: async (pageData) => {
+  const doc = await PDFJS.getDocument(new Uint8Array(buffer));
+  for (let n = 1; n <= Math.min(doc.numPages, 20); n++) {
+    const pageData = await doc.getPage(n);
+    {
       const tc = await pageData.getTextContent({ normalizeWhitespace: false, disableCombineTextItems: false });
       const parts = tc.items
         .filter((it) => it.str && it.str.trim() !== '')
@@ -35,9 +38,9 @@ async function extractLines(buffer) {
         return s;
       });
       pages.push(text.join('\n'));
-      return '';
-    },
-  });
+    }
+  }
+  if (doc.destroy) doc.destroy();
   return pages.join('\n').normalize('NFC');
 }
 

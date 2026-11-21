@@ -1,0 +1,45 @@
+PHẦN MỀM QUẢN LÝ KHO - KHO HÀNG ETC MDA
+=======================================
+
+1. CÀI ĐẶT
+   - Giải nén toàn bộ thư mục này vào một nơi cố định, ví dụ: D:\KhoETC
+     (không chạy trực tiếp bên trong file .zip).
+   - Không cần cài thêm phần mềm nào.
+
+2. MỞ PHẦN MỀM
+   - Bấm đúp vào KhoETC.exe.
+   - Một cửa sổ đen hiện ra (đây là máy chủ của phần mềm) và trình duyệt
+     tự mở trang http://127.0.0.1:3000
+   - KHÔNG đóng cửa sổ đen trong khi đang dùng. Muốn tắt phần mềm thì đóng
+     cửa sổ đen.
+   - Lần đầu Windows có thể hiện cảnh báo "Windows protected your PC"
+     (do file chưa có chữ ký số): bấm "More info" -> "Run anyway".
+   - Nếu tường lửa hỏi quyền mạng: chỉ dùng trên máy này thì có thể bấm Hủy.
+
+3. ĐĂNG NHẬP LẦN ĐẦU
+   - Tên đăng nhập: admin      Mật khẩu: admin@123
+   - Phần mềm sẽ bắt đổi mật khẩu ngay. Hãy ghi nhớ mật khẩu mới.
+   - Vào Cài đặt: điền tên, địa chỉ, mã số thuế đơn vị, ngày chốt số dư
+     (ngày A) và ký hiệu số chứng từ.
+
+4. DỮ LIỆU VÀ SAO LƯU
+   - Toàn bộ dữ liệu nằm trong thư mục "data" cạnh file KhoETC.exe
+     (kho.db và các file PDF đính kèm).
+   - SAO LƯU: tắt phần mềm, sao chép cả thư mục "data" sang ổ khác / USB /
+     Google Drive. Nên làm hằng ngày hoặc hằng tuần.
+   - Chuyển sang máy khác: chép cả thư mục KhoETC (gồm "data") sang máy mới.
+
+5. DÙNG CHUNG CHO NHIỀU MÁY TRONG MẠNG NỘI BỘ (tùy chọn)
+   - Mở file kho-config.json, đổi "host": "127.0.0.1" thành "host": "0.0.0.0"
+     rồi mở lại phần mềm, cho phép qua tường lửa.
+   - Máy khác mở trình duyệt vào http://<địa-chỉ-IP-máy-này>:3000
+     (xem IP bằng lệnh ipconfig). Mỗi người dùng tài khoản riêng.
+   - Muốn đổi cổng 3000: sửa "port" trong kho-config.json.
+
+6. GẶP SỰ CỐ
+   - Bấm KhoETC.exe mà không thấy gì: có thể phần mềm đang chạy sẵn, mở
+     trình duyệt vào http://127.0.0.1:3000
+   - Quên mật khẩu admin: tắt phần mềm, mở Command Prompt tại thư mục này
+     và chạy:   KhoETC.exe --reset-admin
+     Mật khẩu admin trở về admin@123 (bắt buộc đổi khi đăng nhập lại).
+     Tài khoản khác quên mật khẩu: admin vào mục Người dùng để đặt lại.

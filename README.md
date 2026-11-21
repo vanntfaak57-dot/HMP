@@ -45,7 +45,11 @@ Trên phiếu xuất: *Đơn giá bán / Doanh thu* là giá bán (lấy từ PD
 ## Bảo mật & nhật ký
 
 - Mật khẩu mã hóa scrypt; tối thiểu 8 ký tự gồm chữ và số; nhập sai 5 lần khóa 15 phút; phiên hết hạn sau 8 giờ không hoạt động.
-- Vai trò: **Quản trị** (toàn quyền), **Kế toán / thủ kho** (nhập liệu, tính giá), **Chỉ xem**.
+- Vai trò (chỉ **Quản trị** được thêm / sửa người dùng):
+  - **Quản trị**: toàn quyền.
+  - **Kế toán**: xem toàn bộ dữ liệu, nhập liệu, tính giá.
+  - **Thủ kho**: chỉ xem **số lượng** (danh mục, phiếu, nhập-xuất-tồn, sổ chi tiết, mẫu in số lượng); mọi giá trị tiền bị máy chủ loại bỏ, không xem được dashboard phân tích, báo cáo theo đối tượng, giá gần nhất, file PDF gốc.
+  - **Chỉ xem**: xem toàn bộ, không sửa.
 - **Nhật ký truy cập** ghi: đăng nhập thành công/thất bại, đăng xuất, đổi mật khẩu, thêm/sửa/xóa mã hàng và chứng từ (kèm nội dung trước khi sửa), tải PDF, tính giá, khóa sổ, xuất báo cáo — kèm thời gian, IP, trình duyệt. Trang *Người dùng* hiển thị các phiên đang đăng nhập.
 
 ## Sao lưu
@@ -56,6 +60,14 @@ Toàn bộ dữ liệu nằm trong thư mục `data/` (CSDL + file PDF đính k�
 
 - Chỉ đọc được PDF có lớp chữ (xuất từ phần mềm kế toán/hóa đơn điện tử). PDF dạng ảnh scan cần nhập tay.
 - Một kho duy nhất; chưa có các loại phiếu khác (trả lại hàng, xuất nội bộ, chuyển kho).
+
+## Đóng gói thành app riêng (không cần cài Node.js)
+
+```bash
+npm run build:app
+```
+
+Tạo `build/dist/KhoETC-Windows-x64.zip` (file `KhoETC.exe`) và bản Linux. Người dùng chỉ cần giải nén, bấm đúp `KhoETC.exe`: trình duyệt tự mở phần mềm, dữ liệu nằm trong thư mục `data` cạnh file chạy. Xem `tools/HUONG-DAN-APP.txt`.
 
 ## Kiểm thử
 
