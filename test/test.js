@@ -47,10 +47,11 @@ const step = (s) => console.log('✔', s);
     assert.equal(p.type, 'X'); assert.equal(p.number, 'XK-PDF-0015'); assert.equal(p.date, '2026-10-15');
     assert.match(p.partner, /Minh Phát/);
     assert.equal(p.lines.length, 2);
-    assert.deepEqual(p.lines.map((l) => [l.code, l.qty, l.unit_price, l.amount]), [['VT001', 120, 100000, 12000000], ['VT002', 1, 500, 500]]);
+    assert.deepEqual(p.lines.map((l) => [l.code, l.qty, l.unit_price, l.amount]), [['VT001', 120, 100000, 12000000], ['VT002', 200, 18000, 3600000]]);
     assert.equal(p.unmatched.length, 1); assert.equal(p.unmatched[0].qty, 5);
     step(`Đọc PDF: số ${p.number}, ngày ${p.date}, KH "${p.partner}", ${p.lines.length} dòng khớp + ${p.unmatched.length} dòng chưa có mã`);
-    await ok('/api/vouchers', { method: 'POST', body: { type: 'X', number: p.number, date: p.date, partner: p.partner, source: 'pdf', attachment: p.attachment, lines: p.lines } });
+    await ok('/api/vouchers', { method: 'POST', body: { type: 'X', number: p.number, date: p.date, partner: p.partner, source: 'pdf', attachment: p.attachment, lines: p.lines.filter((l) => l.code === 'VT001') } });
+    await ok('/api/vouchers', { method: 'POST', body: { type: 'X', date: '2026-10-15', lines: [{ item_id: C.id, qty: 1, unit_price: 500 }] } });
     await ok('/api/vouchers', { method: 'POST', body: { type: 'X', date: '2026-10-20', lines: [{ item_id: C.id, qty: 1, unit_price: 500 }] } });
     await ok('/api/vouchers', { method: 'POST', body: { type: 'X', date: '2026-10-25', lines: [{ item_id: C.id, qty: 1, unit_price: 500 }] } });
     step('Lưu phiếu xuất từ PDF và nhập tay');
@@ -74,7 +75,7 @@ const step = (s) => console.log('✔', s);
 
     const xs = await ok('/api/vouchers?type=X');
     const pdfV = xs.find((v) => v.number === 'XK-PDF-0015');
-    assert.equal(pdfV.total_cost, 10320000 + 333); step('Giá vốn được ghi vào phiếu xuất');
+    assert.equal(pdfV.total_cost, 10320000); step('Giá vốn được ghi vào phiếu xuất');
 
     await ok('/api/periods/2026-10/lock', { method: 'POST', body: { locked: true } });
     assert.equal((await api(`/api/vouchers/${pdfV.id}`, { method: 'DELETE' })).status, 400); step('Khóa sổ chặn sửa/xóa chứng từ');

@@ -14,9 +14,9 @@ const out = process.argv[2];
   <table border="1" cellspacing="0" cellpadding="6" style="width:100%;border-collapse:collapse">
    <tr><th>STT</th><th>Tên hàng</th><th>Mã số</th><th>ĐVT</th><th>SL yêu cầu</th><th>SL thực xuất</th><th>Đơn giá</th><th>Thành tiền</th></tr>
    <tr><td>1</td><td>Xi măng PCB40</td><td>VT001</td><td>Bao</td><td>120</td><td>120</td><td>100.000</td><td>12.000.000</td></tr>
-   <tr><td>2</td><td>Thép cuộn D6</td><td>VT002</td><td>Kg</td><td>1</td><td>1</td><td>500</td><td>500</td></tr>
+   <tr><td>2</td><td>Thép cuộn D6</td><td>VT002</td><td>Kg</td><td>200</td><td>200</td><td>18.000</td><td>3.600.000</td></tr>
    <tr><td>3</td><td>Gạch ốp lát 60x60</td><td>GACH60</td><td>Thùng</td><td>5</td><td>5</td><td>250.000</td><td>1.250.000</td></tr>
-   <tr><td colspan="7">Cộng</td><td>13.250.500</td></tr>
+   <tr><td colspan="7">Cộng</td><td>16.850.000</td></tr>
   </table></body></html>`);
   await p.pdf({ path: out, format: 'A4' });
   await b.close();
